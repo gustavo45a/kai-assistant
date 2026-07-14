@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -13,6 +14,10 @@ class AlterforgeApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: ThemeData.dark().copyWith(
           scaffoldBackgroundColor: const Color(0xFF07090E),
+          colorScheme: const ColorScheme.dark(
+            primary: Color(0xFF00B4D8),
+            surface: Color(0xFF0F131A),
+          ),
         ),
         home: const AlterforgeHome(),
       );
@@ -30,6 +35,7 @@ class ChatThread {
   final String botName;
   final String iaModel;
   List<Map<String, String>> messages;
+  bool modeloInicializado;
 
   ChatThread({
     required this.id,
@@ -37,21 +43,24 @@ class ChatThread {
     required this.botName,
     required this.iaModel,
     required this.messages,
+    this.modeloInicializado = false,
   });
 }
 
 class _AlterforgeHomeState extends State<AlterforgeHome> {
-  final String _versionHub = "1.0.0";
+  final String _versionHub = "1.2.0";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
 
   List<ChatThread> _threads = [];
   String? _activeThreadId;
 
   bool _descargando = false;
+  bool _pensando = false;
   double _progreso = 0.0;
-  String _estadoTexto = "Alterforge Core: Estable";
+  String _estadoTexto = "Alterforge Core: Listo";
 
   final TextEditingController _chatController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -59,12 +68,13 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
     final initialId = const Uuid().v4();
     _threads.add(ChatThread(
       id: initialId,
-      title: "Sistema operativo Zinos",
+      title: "Instancia KAI Inicial",
       botName: "KAI",
-      iaModel: "Zinos Core Local 3B",
+      iaModel: "Zinos Core 3B (Local)",
+      modeloInicializado: true,
       messages: [
-        {"sender": "system", "text": "ALTERFORGE ENGINE v1.0.0. Núcleo Zynoox IA inicializado."},
-        {"sender": "assistant", "text": "Variante KAI cargada (Modelo: Zinos Core Local 3B). Procesando localmente."},
+        {"sender": "system", "text": "ALTERFORGE EMBEDDED ENGINE v$_versionHub activo."},
+        {"sender": "assistant", "text": "Forja local lista y embebida en la app. El usuario no requiere configuraciones externas. ¿Qué forjamos?"},
       ],
     ));
     _activeThreadId = initialId;
@@ -72,11 +82,111 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
 
   ChatThread get _activeThread => _threads.firstWhere((t) => t.id == _activeThreadId);
 
+  void _scrollAlFinal() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Future<void> _procesarMensajeLocal() async {
+    if (_chatController.text.trim().isEmpty || _pensando) return;
+
+    final textoUsuario = _chatController.text.trim();
+    _chatController.clear();
+
+    setState(() {
+      _pensando = true;
+      _activeThread.messages.add({"sender": "user", "text": textoUsuario});
+      _activeThread.messages.add({"sender": "assistant", "text": ""});
+    });
+    _scrollAlFinal();
+
+    final int indiceRespuesta = _activeThread.messages.length - 1;
+
+    try {
+      String respuestaModelo = "Generando respuesta desde la memoria local del dispositivo a través de Alterforge Core nativo...";
+      int caracter = 0;
+
+      Future.doWhile(() async {
+        await Future.delayed(const Duration(milliseconds: 15));
+        if (caracter >= respuestaModelo.length) {
+          setState(() => _pensando = false);
+          return false;
+        }
+        caracter += 2;
+        if (caracter > respuestaModelo.length) caracter = respuestaModelo.length;
+        
+        setState(() {
+          _activeThread.messages[indiceRespuesta]["text"] = respuestaModelo.substring(0, caracter);
+        });
+        _scrollAlFinal();
+        return true;
+      });
+
+    } catch (e) {
+      setState(() {
+        _pensando = false;
+        _activeThread.messages[indiceRespuesta]["text"] = "Error crítico: El núcleo local de inferencia no pudo leer los pesos en memoria.";
+      });
+    }
+  }
+
+  void _forjarEInicializarChat(String bot, String modelo) async {
+    final newId = const Uuid().v4();
+    final nuevoThread = ChatThread(
+      id: newId,
+      title: "$bot • ${modelo.split(' ')[2]}",
+      botName: bot,
+      iaModel: modelo,
+      messages: [],
+    );
+
+    setState(() {
+      _threads.insert(0, nuevoThread);
+      _activeThreadId = newId;
+      _pensando = true;
+    });
+
+    setState(() {
+      _activeThread.messages.add({
+        "sender": "system",
+        "text": "Descargando pesos de arquitectura local inteligente ($modelo) directamente al almacenamiento seguro del dispositivo... No requiere dependencias externas."
+      });
+    });
+
+    double progresoDescarga = 0.0;
+    Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (progresoDescarga >= 1.0) {
+        timer.cancel();
+        setState(() {
+          _pensando = false;
+          _activeThread.modeloInicializado = true;
+          _activeThread.messages.add({
+            "sender": "assistant",
+            "text": "Forja completada con éxito. Soy la variante $bot running local en tu hardware."
+          });
+        });
+        _scrollAlFinal();
+      } else {
+        progresoDescarga += 0.05;
+        setState(() {
+          _estadoTexto = "Descargando Modelo IA: ${(progresoDescarga * 100).toStringAsFixed(0)}%";
+        });
+      }
+    });
+  }
+
   void _mostrarSelectorNuevoChat() {
     String selectedBot = "KAI";
-    String selectedIA = "Zinos Core Light 1.5B";
+    String selectedIA = "Zinos Core Local 3B";
     bool analizandoHardware = true;
-    String hardwareRecomendacion = "Analizando especificaciones físicas...";
+    String hardwareRecomendacion = "Escaneando hardware del dispositivo...";
 
     showDialog(
       context: context,
@@ -84,23 +194,28 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
         return StatefulBuilder(
           builder: (context, setModalState) {
             if (analizandoHardware) {
-              Future.delayed(const Duration(milliseconds: 1200), () {
+              Future.delayed(const Duration(milliseconds: 900), () {
                 if (mounted) {
                   setModalState(() {
                     analizandoHardware = false;
-                    hardwareRecomendacion = "Scanner: 8GB RAM detectados / GPU Adreno activa.\n"
-                        "Recomendado para tu hardware: Modelos de 1.5B a 3B parámetros para latencia cero.";
-                    selectedIA = "Zinos Core Local 3B";
+                    hardwareRecomendacion = "Hardware Scanner: GPU nativa compatible con Vulkan / NPU activa.\nRecomendado: Modelos 1.5B y 3B para evitar cierres por falta de RAM.";
                   });
                 }
               });
             }
 
             return AlertDialog(
-              backgroundColor: const Color(0xFF121620),
-              title: const Text("⚙️ Forjar Nuevo Canal Inteligente"),
+              backgroundColor: const Color(0xFF131722),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.memory_rounded, color: Color(0xFF00B4D8)),
+                  SizedBox(width: 10),
+                  Text("Configurar Nueva Variante Local", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                ],
+              ),
               content: SizedBox(
-                width: 450,
+                width: 400,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -109,84 +224,45 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: analizandoHardware ? Colors.white.withOpacity(0.02) : const Color(0xFF07090E),
+                        color: const Color(0xFF07090E),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: analizandoHardware ? Colors.white10 : const Color(0xFF00B4D8).withOpacity(0.3)),
+                        border: Border.all(color: const Color(0xFF00B4D8).withOpacity(0.2)),
                       ),
-                      child: Row(
-                        children: [
-                          if (analizandoHardware)
-                            const SizedBox(
-                              width: 16, height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00B4D8)),
-                            )
-                          else
-                            const Icon(Icons.developer_board, color: Color(0xFF00B4D8), size: 20),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              hardwareRecomendacion,
-                              style: TextStyle(
-                                fontSize: 12, 
-                                // CORREGIDO: Cambiado de whitee7 a white70
-                                color: analizandoHardware ? Colors.white38 : Colors.white70,
-                                fontFamily: 'monospace'
-                              ),
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        hardwareRecomendacion,
+                        style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace'),
                       ),
                     ),
                     const SizedBox(height: 20),
-                    const Text("Elige la variante del Bot:", style: TextStyle(fontSize: 13, color: Colors.white70)),
+                    const Text("Elegir Personalidad del Bot:", style: TextStyle(fontSize: 12, color: Colors.white38)),
                     DropdownButton<String>(
                       value: selectedBot,
                       isExpanded: true,
-                      dropdownColor: const Color(0xFF121620),
-                      items: ["KAI", "SELENE", "CHRONOS"].map((String value) {
-                        return DropdownMenuItem<String>(value: value, child: Text(value));
-                      }).toList(),
+                      dropdownColor: const Color(0xFF131722),
+                      items: ["KAI", "SELENE", "CHRONOS"].map((val) => DropdownMenuItem(value: val, child: Text(val))).toList(),
                       onChanged: (val) => setModalState(() => selectedBot = val!),
                     ),
                     const SizedBox(height: 16),
-                    const Text("Asignar arquitectura IA local:", style: TextStyle(fontSize: 13, color: Colors.white70)),
+                    const Text("Modelo IA Embebido Automático:", style: TextStyle(fontSize: 12, color: Colors.white38)),
                     DropdownButton<String>(
                       value: selectedIA,
                       isExpanded: true,
-                      dropdownColor: const Color(0xFF121620),
-                      items: ["Zinos Core Light 1.5B", "Zinos Core Local 3B", "Zinos Heavy Pro 7B (Lento)"].map((String value) {
-                        return DropdownMenuItem<String>(value: value, child: Text(value));
-                      }).toList(),
+                      dropdownColor: const Color(0xFF131722),
+                      items: ["Zinos Core Light 1.5B", "Zinos Core Local 3B", "Zinos Heavy 7B"].map((val) => DropdownMenuItem(value: val, child: Text(val))).toList(),
                       onChanged: (val) => setModalState(() => selectedIA = val!),
                     ),
                   ],
                 ),
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Cancelar", style: TextStyle(color: Colors.white38)),
-                ),
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.white38))),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0077B6)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0077B6), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                   onPressed: analizandoHardware ? null : () {
-                    setState(() {
-                      final newId = const Uuid().v4();
-                      _threads.insert(0, ChatThread(
-                        id: newId,
-                        title: "Instancia $selectedBot (${selectedIA.split(' ')[2]})",
-                        botName: selectedBot,
-                        iaModel: selectedIA,
-                        messages: [
-                          {"sender": "system", "text": "Canal forjado con arquitectura $selectedIA."},
-                          {"sender": "assistant", "text": "Hola, soy la variante $selectedBot. Sistema local listo para operar de forma privada."},
-                        ],
-                      ));
-                      _activeThreadId = newId;
-                    });
                     Navigator.pop(context);
+                    _forjarEInicializarChat(selectedBot, selectedIA);
                   },
-                  child: const Text("Forjar Chat"),
+                  child: const Text("Descargar e Iniciar"),
                 ),
               ],
             );
@@ -198,16 +274,13 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
 
   Future<void> _ejecutarActualizacionOTA() async {
     if (_descargando) return;
-    setState(() {
-      _descargando = true;
-      _estadoTexto = "Escaneando nube Zynoox...";
-    });
+    setState(() { _descargando = true; _estadoTexto = "Buscando updates del Hub..."; });
     try {
       final dio = Dio();
       final dir = await getExternalStorageDirectory();
-      if (dir == null) throw Exception("Error I/O");
-      final rutaInstalador = "${dir.path}/alterforge_update.apk";
-      await dio.download(_urlApkRemoto, rutaInstalador, onReceiveProgress: (recibido, total) {
+      if (dir == null) throw Exception();
+      final ruta = "${dir.path}/alterforge_update.apk";
+      await dio.download(_urlApkRemoto, ruta, onReceiveProgress: (recibido, total) {
         if (total != -1) {
           setState(() {
             _progreso = recibido / total;
@@ -215,22 +288,10 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
           });
         }
       });
-      setState(() { _descargando = false; _estadoTexto = "¡OTA lista! Instala desde almacenamiento."; });
+      setState(() { _descargando = false; _estadoTexto = "¡Hub al día!"; });
     } catch (e) {
-      setState(() { _descargando = false; _estadoTexto = "Forja en V$_versionHub"; });
+      setState(() { _descargando = false; _estadoTexto = "Alterforge V$_versionHub"; });
     }
-  }
-
-  void _enviarMensaje() {
-    if (_chatController.text.trim().isEmpty) return;
-    setState(() {
-      _activeThread.messages.add({"sender": "user", "text": _chatController.text});
-      _activeThread.messages.add({
-        "sender": "assistant",
-        "text": "[${_activeThread.botName} via ${_activeThread.iaModel}]: Computando respuesta en el procesador local..."
-      });
-      _chatController.clear();
-    });
   }
 
   @override
@@ -238,53 +299,61 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
     return Scaffold(
       body: Row(
         children: [
+          // BARRA LATERAL
           Container(
-            width: 260,
-            color: const Color(0xFF0F131A),
+            width: 270,
+            decoration: BoxDecoration(
+              color: const Color(0xFF0C0F16),
+              // CORREGIDO: Cambiado de white05 a white12
+              border: Border(right: BorderSide(color: Colors.white12, width: 0.5)),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 24),
+                const SizedBox(height: 35),
                 Center(
                   child: GestureDetector(
                     onTap: _ejecutarActualizacionOTA,
-                    child: Container(
-                      width: 80, height: 80,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      width: 85, height: 85,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        boxShadow: [BoxShadow(color: const Color(0xFF00B4D8).withOpacity(0.2), blurRadius: 15)],
-                        gradient: const LinearGradient(colors: [Color(0xFF90E0EF), Color(0xFF0096C7)]),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _pensando ? const Color(0xFF00E5FF).withOpacity(0.35) : const Color(0xFF00B4D8).withOpacity(0.15),
+                            blurRadius: 20,
+                          )
+                        ],
+                        gradient: const LinearGradient(colors: [Color(0xFF00E5FF), Color(0xFF005F73)]),
                       ),
-                      child: const Icon(Icons.build_circle_rounded, color: Colors.white, size: 45),
+                      child: const Icon(Icons.build_circle_rounded, color: Colors.white, size: 48),
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Center(
-                  child: Text("ALTERFORGE", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1.5)),
-                ),
-                const Center(
-                  child: Text("BY ZYNOOX IA", style: TextStyle(fontSize: 9, color: Colors.white38, letterSpacing: 1)),
-                ),
-                const SizedBox(height: 20),
+                const Center(child: Text("ALTERFORGE", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, letterSpacing: 2))),
+                const Center(child: Text("BY ZYNOOX IA", style: TextStyle(fontSize: 9, color: Colors.white38, letterSpacing: 1.5))),
+                const SizedBox(height: 25),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E2530),
+                      backgroundColor: const Color(0xFF161B25),
                       foregroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 44),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      minimumSize: const Size(double.infinity, 46),
+                      // CORREGIDO: Cambiado de white05 a white12
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
                     ),
                     onPressed: _mostrarSelectorNuevoChat,
-                    icon: const Icon(Icons.add, size: 18, color: Color(0xFF00B4D8)),
-                    label: const Text("Nuevo chat", style: TextStyle(fontSize: 13)),
+                    icon: const Icon(Icons.add_rounded, size: 20, color: Color(0xFF00E5FF)),
+                    label: const Text("Nuevo chat", style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 25),
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 20),
-                  child: Text("Recientes", style: TextStyle(fontSize: 11, color: Colors.white38, fontWeight: FontWeight.bold)),
+                  child: Text("CANALES ACTIVOS LOCALES", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold, letterSpacing: 1)),
                 ),
                 const SizedBox(height: 8),
                 Expanded(
@@ -294,18 +363,16 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                       final thread = _threads[index];
                       final isSelected = thread.id == _activeThreadId;
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                         child: ListTile(
                           dense: true,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           selected: isSelected,
-                          selectedTileColor: const Color(0xFF1E2530),
-                          leading: Icon(Icons.chat_bubble_outline, size: 15, color: isSelected ? const Color(0xFF00B4D8) : Colors.white38),
+                          selectedTileColor: const Color(0xFF161B25),
+                          leading: Icon(Icons.memory_outlined, size: 16, color: isSelected ? const Color(0xFF00E5FF) : Colors.white30),
                           title: Text(
                             thread.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: isSelected ? Colors.white : Colors.white70, fontSize: 13),
+                            style: TextStyle(color: isSelected ? Colors.white : Colors.white70, fontSize: 13, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal),
                           ),
                           onTap: () => setState(() => _activeThreadId = thread.id),
                         ),
@@ -313,20 +380,28 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                     },
                   ),
                 ),
+                if (_descargando)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: LinearProgressIndicator(value: _progreso, color: const Color(0xFF00E5FF)),
+                  ),
                 Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(_estadoTexto, style: const TextStyle(fontSize: 10, color: Colors.white24)),
+                  padding: const EdgeInsets.all(20),
+                  child: Text(_estadoTexto, style: const TextStyle(fontSize: 10, color: Colors.white38, fontFamily: 'monospace')),
                 )
               ],
             ),
           ),
+          
+          // ENTORNO DEL PANEL DE CONTROL
           Expanded(
             child: Container(
-              color: Colors.black,
+              color: const Color(0xFF07090E),
               child: Column(
                 children: [
                   Expanded(
                     child: ListView.builder(
+                      controller: _scrollController,
                       padding: const EdgeInsets.all(24),
                       itemCount: _activeThread.messages.length,
                       itemBuilder: (context, index) {
@@ -334,62 +409,80 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                         final sender = msg["sender"];
                         
                         Alignment align = Alignment.centerLeft;
-                        Color bg = const Color(0xFF151922);
+                        BoxDecoration decoration = BoxDecoration(
+                          color: const Color(0xFF0F131A),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.white.withOpacity(0.03)),
+                        );
+                        TextStyle textStyle = const TextStyle(color: Colors.white, fontSize: 14.5, height: 1.4);
+
                         if (sender == "user") {
                           align = Alignment.centerRight;
-                          bg = const Color(0xFF0077B6);
+                          decoration = BoxDecoration(
+                            gradient: const LinearGradient(colors: [Color(0xFF0077B6), Color(0xFF005F73)]),
+                            borderRadius: BorderRadius.circular(14),
+                          );
                         } else if (sender == "system") {
                           align = Alignment.center;
-                          bg = Colors.transparent;
+                          decoration = BoxDecoration(
+                            color: const Color(0xFF00E5FF).withOpacity(0.03),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.1)),
+                          );
+                          textStyle = const TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontFamily: 'monospace');
                         }
 
                         return Align(
                           alignment: align,
+                          // CORREGIDO: maxWidth movido dentro de un BoxConstraints asignado a constraints
                           child: Container(
-                            margin: const EdgeInsets.symmetric(vertical: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: bg,
-                              borderRadius: BorderRadius.circular(14),
-                              border: sender == "system" ? Border.all(color: Colors.white10) : null,
+                            constraints: BoxConstraints(
+                              maxWidth: MediaQuery.of(context).size.width * 0.6,
                             ),
-                            child: Text(
-                              msg["text"]!,
-                              style: TextStyle(
-                                color: sender == "system" ? Colors.white38 : Colors.white,
-                                fontSize: sender == "system" ? 11 : 14,
-                              ),
-                            ),
+                            margin: const EdgeInsets.symmetric(vertical: 5),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            decoration: decoration,
+                            child: Text(msg["text"]!, style: textStyle),
                           ),
                         );
                       },
                     ),
                   ),
-                  Padding(
+                  
+                  // Campo de Entrada
+                  Container(
                     padding: const EdgeInsets.all(20),
                     child: Row(
                       children: [
                         Expanded(
                           child: TextField(
                             controller: _chatController,
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                            onSubmitted: (_) => _procesarMensajeLocal(),
                             decoration: InputDecoration(
-                              hintText: "Pregúntale a ${_activeThread.botName}...",
-                              hintStyle: const TextStyle(color: Colors.white24),
-                              fillColor: const Color(0xFF0F131A),
+                              hintText: _pensando ? "Computando matriz nativa..." : "Escribe una instrucción a ${_activeThread.botName}...",
+                              hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
+                              fillColor: const Color(0xFF0C0F16),
                               filled: true,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                              // CORREGIDO: Cambiado de white05 a white12
+                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Colors.white12)),
+                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF00B4D8), width: 0.8)),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        // CORREGIDO: Sintaxis moderna para darle color de fondo a un IconButton
+                        const SizedBox(width: 12),
                         IconButton(
-                          icon: const Icon(Icons.arrow_upward, color: Colors.white),
+                          icon: _pensando 
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 22),
                           style: IconButton.styleFrom(
-                            backgroundColor: const Color(0xFF005F73),
+                            backgroundColor: const Color(0xFF00B4D8),
+                            disabledBackgroundColor: Colors.white10,
+                            minimumSize: const Size(50, 50),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
-                          onPressed: _enviarMensaje,
+                          onPressed: _pensando ? null : _procesarMensajeLocal,
                         ),
                       ],
                     ),

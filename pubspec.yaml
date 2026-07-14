@@ -10,11 +10,12 @@ dependencies:
   flutter:
     sdk: flutter
   dio: ^5.4.0
+  http: ^1.2.0
   path_provider: ^2.1.0
-  device_info_plus: ^10.1.0  # <-- Para escanear el procesador y modelo
-  system_info2: ^4.1.0      # <-- Para leer la memoria RAM real libre
-  uuid: ^4.3.3              # <-- Para crear hilos de chat únicos
-
+  device_info_plus: ^10.1.0
+  system_info2: ^4.1.0
+  uuid: ^4.3.3
+  
 dev_dependencies:
   flutter_test:
     sdk: flutter
