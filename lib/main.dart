@@ -44,7 +44,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
   final String _versionHub = "1.0.0";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
 
-  // Estructura de Hilos de Chat estilo Gemini
   List<ChatThread> _threads = [];
   String? _activeThreadId;
 
@@ -57,7 +56,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
   @override
   void initState() {
     super.initState();
-    // Creamos un hilo inicial por defecto
     final initialId = const Uuid().v4();
     _threads.add(ChatThread(
       id: initialId,
@@ -74,7 +72,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
 
   ChatThread get _activeThread => _threads.firstWhere((t) => t.id == _activeThreadId);
 
-  // --- ESCANEO NATIVO DE HARDWARE DE TU TABLET ---
   void _mostrarSelectorNuevoChat() {
     String selectedBot = "KAI";
     String selectedIA = "Zinos Core Light 1.5B";
@@ -86,16 +83,14 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            // Simulación del escaneo de hardware local (CPU/NPU/RAM) al abrir el Modal
             if (analizandoHardware) {
               Future.delayed(const Duration(milliseconds: 1200), () {
                 if (mounted) {
                   setModalState(() {
                     analizandoHardware = false;
-                    // Diagnóstico basado en el rendimiento típico de la arquitectura de la Tab
                     hardwareRecomendacion = "Scanner: 8GB RAM detectados / GPU Adreno activa.\n"
                         "Recomendado para tu hardware: Modelos de 1.5B a 3B parámetros para latencia cero.";
-                    selectedIA = "Zinos Core Local 3B"; // Auto-selecciona el óptimo
+                    selectedIA = "Zinos Core Local 3B";
                   });
                 }
               });
@@ -110,7 +105,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // CONTENEDOR DE DIAGNÓSTICO DE HARDWARE
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
@@ -134,7 +128,8 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                               hardwareRecomendacion,
                               style: TextStyle(
                                 fontSize: 12, 
-                                color: analizandoHardware ? Colors.white38 : Colors.whitee7,
+                                // CORREGIDO: Cambiado de whitee7 a white70
+                                color: analizandoHardware ? Colors.white38 : Colors.white70,
                                 fontFamily: 'monospace'
                               ),
                             ),
@@ -143,7 +138,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    // SELECCIÓN DE VARIANTE/BOT
                     const Text("Elige la variante del Bot:", style: TextStyle(fontSize: 13, color: Colors.white70)),
                     DropdownButton<String>(
                       value: selectedBot,
@@ -155,7 +149,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                       onChanged: (val) => setModalState(() => selectedBot = val!),
                     ),
                     const SizedBox(height: 16),
-                    // SELECCIÓN DE MODELO LLM LOCAL
                     const Text("Asignar arquitectura IA local:", style: TextStyle(fontSize: 13, color: Colors.white70)),
                     DropdownButton<String>(
                       value: selectedIA,
@@ -245,9 +238,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
     return Scaffold(
       body: Row(
         children: [
-          // ==========================================
-          // BARRA LATERAL ESTILO GEMINI (ALTERFORGE HUB)
-          // ==========================================
           Container(
             width: 260,
             color: const Color(0xFF0F131A),
@@ -255,7 +245,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 24),
-                // Botón del Yunque Interno de Alterforge
                 Center(
                   child: GestureDetector(
                     onTap: _ejecutarActualizacionOTA,
@@ -278,8 +267,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                   child: Text("BY ZYNOOX IA", style: TextStyle(fontSize: 9, color: Colors.white38, letterSpacing: 1)),
                 ),
                 const SizedBox(height: 20),
-                
-                // BOTÓN: NUEVO CHAT (DISPARADOR DEL HARDWARE SCANNER)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: ElevatedButton.icon(
@@ -300,8 +287,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                   child: Text("Recientes", style: TextStyle(fontSize: 11, color: Colors.white38, fontWeight: FontWeight.bold)),
                 ),
                 const SizedBox(height: 8),
-                
-                // LISTA DE HILOS ABIERTOS EN TU COMPILACIÓN
                 Expanded(
                   child: ListView.builder(
                     itemCount: _threads.length,
@@ -328,8 +313,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                     },
                   ),
                 ),
-                
-                // Monitor del estado de descarga OTA inferior
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Text(_estadoTexto, style: const TextStyle(fontSize: 10, color: Colors.white24)),
@@ -337,10 +320,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
               ],
             ),
           ),
-          
-          // ==========================================
-          // ENTORNO DE CHAT ACTIVO
-          // ==========================================
           Expanded(
             child: Container(
               color: Colors.black,
@@ -386,8 +365,6 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                       },
                     ),
                   ),
-                  
-                  // Entrada de texto principal
                   Padding(
                     padding: const EdgeInsets.all(20),
                     child: Row(
@@ -406,9 +383,12 @@ class _AlterforgeHomeState extends State<AlterforgeHome> {
                           ),
                         ),
                         const SizedBox(width: 10),
+                        // CORREGIDO: Sintaxis moderna para darle color de fondo a un IconButton
                         IconButton(
                           icon: const Icon(Icons.arrow_upward, color: Colors.white),
-                          backgroundColor: const Color(0xFF005F73),
+                          style: IconButton.styleFrom(
+                            backgroundColor: const Color(0xFF005F73),
+                          ),
                           onPressed: _enviarMensaje,
                         ),
                       ],

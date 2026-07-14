@@ -12,7 +12,7 @@ dependencies:
   dio: ^5.4.0
   path_provider: ^2.1.0
   device_info_plus: ^10.1.0  # <-- Para escanear el procesador y modelo
-  system_info2: ^1.0.0      # <-- Para leer la memoria RAM real libre
+  system_info2: ^4.1.0      # <-- Para leer la memoria RAM real libre
   uuid: ^4.3.3              # <-- Para crear hilos de chat únicos
 
 dev_dependencies:
