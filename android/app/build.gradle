@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.tuproyecto.kai.kai_app"
+    namespace = "com.zynoox.vantablack_hub" // Actualizado para que coincida con tu app
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -19,15 +19,16 @@ android {
         jvmTarget = JavaVersion.VERSION_1_8
     }
 
-   defaultConfig {
-    // TODO: Especifica tu propio Application ID único (ej. com.zynoox.vantablack)
-    applicationId "com.zynoox.vantablack_hub"
-    // minSdk necesario para las APIs de almacenamiento seguro y OpenFile
-    minSdkVersion 21
-    targetSdkVersion 34
-    versionCode flutterVersionCode.toInteger()
-    versionName flutterVersionName
-}
+    defaultConfig {
+        applicationId "com.zynoox.vantablack_hub"
+        // minSdk necesario para las APIs de almacenamiento seguro y OpenFile
+        minSdkVersion 21
+        targetSdkVersion 34
+        
+        // Solución al error: Quemamos las versiones manualmente para Codespaces
+        versionCode 1
+        versionName "1.0.0"
+    }
 
     buildTypes {
         release {
