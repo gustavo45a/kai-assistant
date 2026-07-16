@@ -1,33 +1,27 @@
-name: kai_app
-description: "A new Flutter project."
+name: vantablack_hub
+description: "Vantablack Hub by Zynoox IA - Matriz de variantes cognitivas locales."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.6.2+1
 
 environment:
-  sdk: ^3.5.0
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
   dio: ^5.4.0
   path_provider: ^2.1.0
-  device_info_plus: ^10.1.0
-  system_info2: ^4.1.0
   uuid: ^4.3.3
   open_file: ^3.3.2
-  
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
-  flutter_launcher_icons: ^0.13.1 # <-- Añade esta línea
-
-flutter_launcher_icons:
-  android: "launcher_icon"
-  image_path: "assets/logo_zynoxia.png" # <-- La ruta donde guardaste tu imagen
-  min_sdk_android: 21
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true
+  
+  # REGISTRO DEL LOGO DE NEÓN GLOBAL
   assets:
-    - assets/logo_zynoxia.png
+    - assets/logo.png
