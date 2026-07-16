@@ -80,7 +80,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "1.6.2";
+  final String _versionHub = "1.6.4";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
   final String _urlModeloBase = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
 
@@ -189,7 +189,7 @@ class _VantablackHomeState extends State<VantablackHome> {
             "Gustavo, análisis completado localmente para: \"$textoUsuario\". Fragmentos listos para descarga.";
       } else {
         respuestaModelo = "[VANTABLACK HUB • MODO NORMAL]\n"
-            "• Procesamiento optimizado de respuesta rápida.\n"
+            "• Inferencia optimizada de alta velocidad.\n"
             "• Interconexión API remota activa.\n"
             "• Datos de nivel 1 listos en milisegundos.\n\n"
             "Respuesta instantánea arrojada por la colmena nativa de Zynoox IA.";
@@ -340,7 +340,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                     onTap: _ejecutarActualizacionOTA,
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 400),
-                      width: 140, height: 140, // Ampliado un poco para que se lean perfecto las letras del logo
+                      width: 140, height: 140, 
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
@@ -373,7 +373,6 @@ class _VantablackHomeState extends State<VantablackHome> {
                   ),
                 ),
                 
-                // NOTA: Se removieron los textos redundantes para dejar lucir el logo impecable
                 const SizedBox(height: 25),
                 
                 // ENTORNO LIQUID GLASS
@@ -464,7 +463,8 @@ class _VantablackHomeState extends State<VantablackHome> {
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: Colors.white.withOpacity(0.015)),
                         );
-                        TextStyle textStyle = const TextStyle(color: Colors.white90, fontSize: 14, height: 1.4);
+                        // Corrección aquí: Usamos Color(0xE6FFFFFF) en lugar del white90 inexistente
+                        TextStyle textStyle = const TextStyle(color: Color(0xE6FFFFFF), fontSize: 14, height: 1.4);
 
                         if (sender == "user") {
                           align = Alignment.centerRight;
