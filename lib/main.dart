@@ -7,7 +7,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:open_file/open_file.dart';
 
-void main() => runApp(const VantablackApp());
+// --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
+void main() {
+  // CORRECCIÓN CLAVE: Obliga a Android a inicializar los canales de plugins ANTES de pintar la app
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const VantablackApp());
+}
 
 class VantablackApp extends StatelessWidget {
   const VantablackApp({super.key});
@@ -80,7 +85,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "1.6.4";
+  final String _versionHub = "1.6.5";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
   final String _urlModeloBase = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
 
@@ -99,7 +104,8 @@ class _VantablackHomeState extends State<VantablackHome> {
   @override
   void initState() {
     super.initState();
-    _cargarDatosDesdeDisco();
+    // Ejecutamos la carga con un micro-delay seguro para asegurar que la vista esté montada
+    scheduleMicrotask(() => _cargarDatosDesdeDisco());
   }
 
   Future<void> _cargarDatosDesdeDisco() async {
@@ -109,11 +115,13 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (await archivo.exists()) {
         final contenido = await archivo.readAsString();
         final List<dynamic> jsonList = jsonDecode(contenido);
-        setState(() {
-          _threads = jsonList.map((e) => ChatThread.fromJson(e)).toList();
-          if (_threads.isNotEmpty) _activeThreadId = _threads.first.id;
-          _estadoTexto = "Matriz Zynoox Estable";
-        });
+        if (mounted) {
+          setState(() {
+            _threads = jsonList.map((e) => ChatThread.fromJson(e)).toList();
+            if (_threads.isNotEmpty) _activeThreadId = _threads.first.id;
+            _estadoTexto = "Matriz Zynoox Estable";
+          });
+        }
       } else {
         _crearHiloInicial();
       }
@@ -124,21 +132,23 @@ class _VantablackHomeState extends State<VantablackHome> {
 
   void _crearHiloInicial() {
     final initialId = const Uuid().v4();
-    setState(() {
-      _threads.add(ChatThread(
-        id: initialId,
-        title: "Instancia KAI Core",
-        botName: "KAI",
-        iaModel: "Zinos Core 1.5B",
-        modeName: "Normal",
-        modeloInicializado: true,
-        messages: [
-          {"sender": "system", "text": "VANTABLACK INTERFACE CONECTADA."},
-          {"sender": "assistant", "text": "Estructura Liquid Glass cargada sobre fondo negro absoluto. ¿Qué variante local despertamos hoy?"},
-        ],
-      ));
-      _activeThreadId = initialId;
-    });
+    if (mounted) {
+      setState(() {
+        _threads.add(ChatThread(
+          id: initialId,
+          title: "Instancia KAI Core",
+          botName: "KAI",
+          iaModel: "Zinos Core 1.5B",
+          modeName: "Normal",
+          modeloInicializado: true,
+          messages: [
+            {"sender": "system", "text": "VANTABLACK INTERFACE CONECTADA."},
+            {"sender": "assistant", "text": "Estructura Liquid Glass cargada sobre fondo negro absoluto. ¿Qué variante local despertamos hoy?"},
+          ],
+        ));
+        _activeThreadId = initialId;
+      });
+    }
     _guardarDatosEnDisco();
   }
 
@@ -189,7 +199,7 @@ class _VantablackHomeState extends State<VantablackHome> {
             "Gustavo, análisis completado localmente para: \"$textoUsuario\". Fragmentos listos para descarga.";
       } else {
         respuestaModelo = "[VANTABLACK HUB • MODO NORMAL]\n"
-            "• Inferencia optimizada de alta velocidad.\n"
+            "• Procesamiento optimizado de respuesta rápida.\n"
             "• Interconexión API remota activa.\n"
             "• Datos de nivel 1 listos en milisegundos.\n\n"
             "Respuesta instantánea arrojada por la colmena nativa de Zynoox IA.";
@@ -334,7 +344,7 @@ class _VantablackHomeState extends State<VantablackHome> {
               children: [
                 const SizedBox(height: 40),
                 
-                // CONTENEDOR DE TU NUEVO LOGO DIAGONAL MAESTRO
+                // CONTENEDOR DEL LOGO GLITCH
                 Center(
                   child: GestureDetector(
                     onTap: _ejecutarActualizacionOTA,
@@ -463,7 +473,6 @@ class _VantablackHomeState extends State<VantablackHome> {
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: Colors.white.withOpacity(0.015)),
                         );
-                        // Corrección aquí: Usamos Color(0xE6FFFFFF) en lugar del white90 inexistente
                         TextStyle textStyle = const TextStyle(color: Color(0xE6FFFFFF), fontSize: 14, height: 1.4);
 
                         if (sender == "user") {
