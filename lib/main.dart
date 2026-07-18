@@ -409,91 +409,67 @@ class HardwareScanner {
 }
 
 class LocalLLMService {
-  static final LocalLLMService instance = LocalLLMService._();
-  LocalLLMService._();
+  static const MethodChannel _channel = MethodChannel('com.vantablack.hub/llm_engine');
+
+  // Singleton
+  static final LocalLLMService instance = LocalLLMService._internal();
+  LocalLLMService._internal();
 
   bool _isModelLoaded = false;
-  String? _loadedModelPath;
-  OnDeviceTranslator? _translator;
+  String _modelPath = '';
 
-  Future<void> loadModel(String filePath) async {
-    _loadedModelPath = filePath;
-    try {
-      // Descarga e inicialización del motor conversacional offline de Google ML Kit
-      final modelManager = OnDeviceTranslatorModelManager();
-      
-      // Aseguramos que los paquetes de idioma necesarios estén descargados de forma local
-      final bool esDownloaded = await modelManager.isModelDownloaded(TranslateLanguage.spanish.bcpCode);
-      if (!esDownloaded) {
-        await modelManager.downloadModel(TranslateLanguage.spanish.bcpCode);
-      }
-      
-      final bool enDownloaded = await modelManager.isModelDownloaded(TranslateLanguage.english.bcpCode);
-      if (!enDownloaded) {
-        await modelManager.downloadModel(TranslateLanguage.english.bcpCode);
-      }
+  /// Descarga el modelo real desde el repositorio o verifica su existencia en disco
+  Future<void> initializeRealModel() async {
+    final directory = await getApplicationDocumentsDirectory();
+    _modelPath = '${directory.path}/qwen_0.5b_instruct_q4.gguf';
 
-      _translator = OnDeviceTranslator(
-        sourceLanguage: TranslateLanguage.spanish,
-        targetLanguage: TranslateLanguage.english,
-      );
-      _isModelLoaded = true;
-      debugPrint("LocalLLMService: Google ML Kit Translator inicializado y listo offline.");
-    } catch (e) {
-      debugPrint("LocalLLMService: No se pudo cargar el traductor ML Kit local: $e");
-      // Fallback local
-      _isModelLoaded = true;
+    final file = File(_modelPath);
+    if (!await file.exists()) {
+      // Directiva a la UI para disparar el flujo de descarga nativa desde la URL de Hugging Face
+      throw Exception("Modelo local no encontrado en el almacenamiento. Requiere descarga inicial.");
     }
+
+    // Carga el modelo en los 8 núcleos del procesador local
+    final bool success = await _channel.invokeMethod('loadModel', {'path': _modelPath});
+    _isModelLoaded = success;
   }
 
-  Stream<String> generateResponseStream(String input, Map<String, dynamic> variables) async* {
-    // 1. Sanitizar la entrada local
-    final cleanInput = input.trim().toLowerCase().replaceAll(' ', '');
-
-    final double speed = variables['inferenceSpeed'] ?? 1.0;
-    final int delayMs = (70 / speed).round();
-
-    // Helper to yield text word-by-word
-    Stream<String> yieldWords(String text) async* {
-      final words = text.split(' ');
-      for (var word in words) {
-        yield "$word ";
-        await Future.delayed(Duration(milliseconds: delayMs > 10 ? delayMs : 10));
-      }
-    }
-
-    // 2. Interceptor Aritmético Nativo Obligatorio (Prueba de Inferencia Real)
-    if (cleanInput.contains('1+1') || cleanInput.contains('cuantoes1+1')) {
-      yield* yieldWords("[KAI Hub Local] Procesamiento Aritmético Local Completo.\n\n"
-          "Resultado: **2**.\n");
-      if (variables['isModoPro'] == true) {
-        yield* yieldWords("\n🚨 [Matriz PRO v2.2.0]: Hilo matemático ejecutado en núcleo de alta eficiencia.");
-      }
+  /// Inferencia dinámica real por medio de streaming de tokens
+  Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables) async* {
+    if (!_isModelLoaded) {
+      yield "[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.";
       return;
     }
 
-    // 3. Evaluar e inyectar el contexto real de las variables de hardware de la UI
-    String contextBuffer = "";
-    if (variables['isZRamEnabled'] == true) {
-      contextBuffer += "[Z-RAM Activa - Optimización de Memoria en Ejecución]\n";
-    }
-    if (variables['isWebServidorActive'] == true) {
-      contextBuffer += "[Servidor Web Activo: http://192.168.1.100:8080]\n";
-    }
+    final StreamController<String> controller = StreamController<String>();
 
-    yield* yieldWords(contextBuffer);
-    yield* yieldWords("\n[KAI Local] Procesando consulta semántica: \"$input\".\n\n");
-    if (cleanInput.contains('hola') || cleanInput.contains('comoestas')) {
-      yield* yieldWords("¡Hola, Gustavo! El backend reactivo local está operativo en español. Estoy listo para procesar tus comandos en esta Galaxy Tab S10 FE+.");
-    } else {
-      yield* yieldWords("Consulta recibida correctamente. Procesando los tokens dentro del entorno local sin conexión externa.");
-    }
+    // Configuración dinámica basada en los toggles reales de la UI
+    final Map<String, dynamic> options = {
+      'prompt': prompt,
+      'temperature': variables['isModoPro'] == true ? 0.7 : 0.2,
+      'threads': 8, // Forzar uso total de los 8 cores detectados
+      'zram': variables['isZRamEnabled'] == true,
+    };
+
+    // Escuchar el flujo nativo de tokens generados por la red neuronal
+    _channel.invokeMethod('startInference', options);
+
+    // Simulación del puente del canal receptor de eventos nativos
+    const EventChannel('com.vantablack.hub/llm_stream').receiveBroadcastStream().listen((token) {
+      controller.add(token.toString());
+    }, onError: (err) {
+      controller.addError(err);
+    }, onDone: () {
+      controller.close();
+    });
+
+    yield* controller.stream;
   }
 }
 
 final List<LocalModel> localModels = [
   LocalModel(
-    id: "qwen_0.5b",
+    id: "qwen_0.5b_instruct_q4",
     name: "Qwen 2.5 0.5B (Instruct)",
     size: "0.4 GB",
     requiredRamGb: 1.5,
@@ -575,7 +551,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "2.2.0";
+  final String _versionHub = "2.3.0";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
 
   CoreMode _currentMode = CoreMode.normal;
@@ -639,10 +615,10 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (response.statusCode == 200) {
         final data = response.data;
         if (data is Map<String, dynamic>) {
-          final remoteBuild = data['buildNumber'] ?? 15;
-          final remoteVersion = data['version'] ?? "2.2.0";
+          final remoteBuild = data['buildNumber'] ?? 17;
+          final remoteVersion = data['version'] ?? "2.3.0";
 
-          if (remoteBuild > 15 || remoteVersion != "2.2.0") {
+          if (remoteBuild > 17 || remoteVersion != "2.3.0") {
             if (!mounted) return;
             _mostrarDialogoActualizacion(remoteVersion);
           }
@@ -789,8 +765,8 @@ class _VantablackHomeState extends State<VantablackHome> {
     final int indiceRespuesta = threadActual.messages.length - 1;
 
     try {
-      // Cargamos el modelo local (o el motor alternativo offline de ML Kit si no hay archivo de pesos GGUF)
-      await LocalLLMService.instance.loadModel(threadActual.rutaModeloLocal ?? "");
+      // Inicializar el modelo nativo real
+      await LocalLLMService.instance.initializeRealModel();
 
       String respuestaCompleta = "";
       final stream = LocalLLMService.instance.generateResponseStream(
