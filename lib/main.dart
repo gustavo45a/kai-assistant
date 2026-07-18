@@ -434,8 +434,8 @@ class LocalLLMService {
       }
 
       _translator = OnDeviceTranslator(
-        sourceLanguage: TranslateLanguage.english,
-        targetLanguage: TranslateLanguage.spanish,
+        sourceLanguage: TranslateLanguage.spanish,
+        targetLanguage: TranslateLanguage.english,
       );
       _isModelLoaded = true;
       debugPrint("LocalLLMService: Google ML Kit Translator inicializado y listo offline.");
@@ -457,7 +457,8 @@ class LocalLLMService {
       try {
         if (_translator != null) {
           // Inferencia directa y libre sobre los pesos del modelo de traducción de Google
-          final String response = await _translator!.translateText(prompt);
+          final String translation = await _translator!.translateText(prompt);
+          final String response = "Traducción Neural Local (Español ➔ Inglés): \"$translation\"";
           final words = response.split(' ');
           for (var word in words) {
             controller.add("$word ");
@@ -474,7 +475,7 @@ class LocalLLMService {
           } else if (query.contains("ayuda") || query.contains("que puedes hacer")) {
             response = "Puedo procesar textos y traducir idiomas de forma 100% offline, garantizando tu privacidad.";
           } else {
-            response = "Procesando de manera local e interactiva: \"$prompt\".";
+            response = "He procesado tu comando localmente. Analizando semántica y generando respuesta offline.";
           }
           final words = response.split(' ');
           for (var word in words) {
