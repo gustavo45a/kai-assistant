@@ -1,0 +1,3 @@
+# ninja log v5
+0	932	1784396279	CMakeFiles/llama-jni.dir/llama-jni.cpp.o	229ceb94e6ec4b19
+937	1081	1784396279	/workspaces/kai-assistant/build/app/intermediates/cxx/RelWithDebInfo/76q5z4c6/obj/x86_64/libllama-jni.so	2389f0db1f9309e4

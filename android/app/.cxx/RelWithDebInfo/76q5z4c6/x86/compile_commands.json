@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/workspaces/kai-assistant/android/app/.cxx/RelWithDebInfo/76q5z4c6/x86",
+  "command": "/home/codespace/android/ndk/23.1.7779620/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=i686-none-linux-android21 --gcc-toolchain=/home/codespace/android/ndk/23.1.7779620/toolchains/llvm/prebuilt/linux-x86_64 --sysroot=/home/codespace/android/ndk/23.1.7779620/toolchains/llvm/prebuilt/linux-x86_64/sysroot -Dllama_jni_EXPORTS -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -mstackrealign -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -O2 -g -DNDEBUG -fPIC -std=gnu++17 -o CMakeFiles/llama-jni.dir/llama-jni.cpp.o -c /workspaces/kai-assistant/android/app/src/main/cpp/llama-jni.cpp",
+  "file": "/workspaces/kai-assistant/android/app/src/main/cpp/llama-jni.cpp"
+}
+]
