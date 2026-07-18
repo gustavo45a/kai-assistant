@@ -578,7 +578,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "1.7.5";
+  final String _versionHub = "2.0.0";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
 
   CoreMode _currentMode = CoreMode.normal;
@@ -642,10 +642,10 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (response.statusCode == 200) {
         final data = response.data;
         if (data is Map<String, dynamic>) {
-          final remoteBuild = data['buildNumber'] ?? 12;
-          final remoteVersion = data['version'] ?? "1.7.5";
+          final remoteBuild = data['buildNumber'] ?? 13;
+          final remoteVersion = data['version'] ?? "2.0.0";
 
-          if (remoteBuild > 12 || remoteVersion != "1.7.5") {
+          if (remoteBuild > 13 || remoteVersion != "2.0.0") {
             if (!mounted) return;
             _mostrarDialogoActualizacion(remoteVersion);
           }
