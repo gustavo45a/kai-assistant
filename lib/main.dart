@@ -593,6 +593,18 @@ class _VantablackHomeState extends State<VantablackHome> {
   double _freeRamGb = 4.0;
   int _cpuCores = 4;
 
+  bool _zRamCompression = true;
+  bool _rigorousSearchOnly = true;
+  bool _ttsEnabled = false;
+  bool _isWebServerActive = false;
+  bool _isModoPro = false;
+  double _inferenceSpeed = 1.0;
+  String _selectedCloudProvider = "Google Drive";
+  bool _visualAnalysis = true;
+  double _visualPrecision = 0.85;
+  bool _quantizedMedia = true;
+  bool _environmentAssistant = false;
+
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
@@ -1101,6 +1113,360 @@ class _VantablackHomeState extends State<VantablackHome> {
     );
   }
 
+  Future<void> _exportarChatLocal() async {
+    final threadActual = _activeThread;
+    if (threadActual.messages.isEmpty) return;
+    
+    try {
+      final buffer = StringBuffer();
+      buffer.writeln("=== HISTORIAL DE CHAT VANTABLACK ===");
+      buffer.writeln("Modelo: ${threadActual.iaModel}");
+      buffer.writeln("Modo: ${threadActual.modeName}");
+      buffer.writeln("Fecha: ${DateTime.now().toIso8601String()}");
+      buffer.writeln("===================================\n");
+      
+      for (var msg in threadActual.messages) {
+        buffer.writeln("[${msg['sender']?.toUpperCase()}]: ${msg['text']}");
+        buffer.writeln("-----------------------------------");
+      }
+      
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File("${dir.path}/chat_export_${threadActual.id.substring(0, 8)}.txt");
+      await file.writeAsString(buffer.toString());
+      
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF131722),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle_outline_rounded, color: Colors.green),
+              SizedBox(width: 8),
+              Text("Historial Guardado", style: TextStyle(color: Colors.white, fontSize: 16)),
+            ],
+          ),
+          content: Text("Chat exportado con éxito en:\n\n${file.path}", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Aceptar", style: TextStyle(color: Color(0xFF00B4D8))),
+            )
+          ],
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al exportar chat: $e")));
+    }
+  }
+
+  Widget _buildMatrixControlPanel() {
+    final activeColor = _currentMode == CoreMode.estudiante ? const Color(0xFF9D4EDD) : const Color(0xFF00B4D8);
+    
+    return Container(
+      width: 310,
+      decoration: const BoxDecoration(
+        color: Color(0xFF030509),
+        border: Border(left: BorderSide(color: Colors.white12, width: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _currentMode == CoreMode.estudiante ? Icons.psychology_rounded : Icons.dashboard_customize_rounded,
+                  color: activeColor,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _currentMode == CoreMode.estudiante ? "MATRIZ DE RAZONAMIENTO" : "MATRIZ DE PRODUCTIVIDAD",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.0,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: _currentMode == CoreMode.estudiante 
+                  ? _buildEstudianteSettings(activeColor) 
+                  : _buildNormalSettings(activeColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEstudianteSettings(Color activeColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("MÓDULOS DE ANÁLISIS CRÍTICO", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        // Context Processing
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text("Comprensión Visual", style: TextStyle(fontSize: 12, color: Colors.white70)),
+          subtitle: const Text("Habilita análisis profundo de imágenes", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          value: _visualAnalysis,
+          activeColor: activeColor,
+          onChanged: (val) => setState(() => _visualAnalysis = val),
+        ),
+        
+        // Rigorous Search
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text("Investigación Rigurosa", style: TextStyle(fontSize: 12, color: Colors.white70)),
+          subtitle: const Text("Filtra y omite blogs o fuentes de baja confianza", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          value: _rigorousSearchOnly,
+          activeColor: activeColor,
+          onChanged: (val) => setState(() => _rigorousSearchOnly = val),
+        ),
+        
+        const SizedBox(height: 16),
+        const Text("COMPRESIÓN Y RECURSOS", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        // RAM Compression
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text("Compresión Z-RAM", style: TextStyle(fontSize: 12, color: Colors.white70)),
+          subtitle: const Text("Optimiza el consumo comprimiendo memoria", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          value: _zRamCompression,
+          activeColor: activeColor,
+          onChanged: (val) => setState(() => _zRamCompression = val),
+        ),
+        
+        if (_zRamCompression) ...[
+          const SizedBox(height: 8),
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text("Eficiencia de Compresión", style: TextStyle(fontSize: 10, color: Colors.white38)),
+              Text("85% activa", style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: 0.85,
+              color: activeColor,
+              backgroundColor: Colors.white10,
+              minHeight: 4,
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 16),
+        const Text("GENERACIÓN Y CONECTORES", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        // Visual Precision Slider
+        Text("Precisión Generativa (${(_visualPrecision * 100).toStringAsFixed(0)}%)", style: const TextStyle(fontSize: 12, color: Colors.white70)),
+        Slider(
+          value: _visualPrecision,
+          min: 0.5,
+          max: 1.0,
+          activeColor: activeColor,
+          inactiveColor: Colors.white10,
+          onChanged: (val) => setState(() => _visualPrecision = val),
+        ),
+        
+        // Cloud integrations
+        const Text("Nube Principal", style: TextStyle(fontSize: 12, color: Colors.white70)),
+        const SizedBox(height: 6),
+        DropdownButton<String>(
+          value: _selectedCloudProvider,
+          isExpanded: true,
+          dropdownColor: const Color(0xFF030509),
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+          underline: Container(height: 1, color: Colors.white10),
+          items: ["Google Drive", "OneDrive", "iCloud", "Canva Connect"]
+              .map((val) => DropdownMenuItem(value: val, child: Text(val)))
+              .toList(),
+          onChanged: (val) {
+            if (val != null) setState(() => _selectedCloudProvider = val);
+          },
+        ),
+
+        const SizedBox(height: 20),
+        const Text("HERRAMIENTAS DE PERSISTENCIA", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF0E1420),
+            foregroundColor: Colors.white,
+            minimumSize: const Size(double.infinity, 40),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: _exportarChatLocal,
+          icon: const Icon(Icons.download_rounded, size: 16),
+          label: const Text("Exportar Historial Local", style: TextStyle(fontSize: 11)),
+        ),
+
+        const SizedBox(height: 20),
+        const Text("CENTRO DE DEBATE", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _ttsEnabled ? activeColor.withOpacity(0.15) : const Color(0xFF0E1420),
+                  foregroundColor: _ttsEnabled ? activeColor : Colors.white60,
+                  side: BorderSide(color: _ttsEnabled ? activeColor : Colors.transparent),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => setState(() => _ttsEnabled = !_ttsEnabled),
+                icon: Icon(_ttsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded, size: 16),
+                label: const Text("Modo TTS", style: TextStyle(fontSize: 11)),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNormalSettings(Color activeColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("RENDIMIENTO Y MULTIMEDIA", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        // Fast Inference Slider
+        Text("Inferencia Rápida (${_inferenceSpeed.toStringAsFixed(1)}x)", style: const TextStyle(fontSize: 12, color: Colors.white70)),
+        Slider(
+          value: _inferenceSpeed,
+          min: 0.5,
+          max: 2.0,
+          activeColor: activeColor,
+          inactiveColor: Colors.white10,
+          onChanged: (val) => setState(() => _inferenceSpeed = val),
+        ),
+        
+        // Quantized Media Toggle
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text("Multimedia Cuantizada", style: TextStyle(fontSize: 12, color: Colors.white70)),
+          subtitle: const Text("Manejo eficiente de imágenes y video", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          value: _quantizedMedia,
+          activeColor: activeColor,
+          onChanged: (val) => setState(() => _quantizedMedia = val),
+        ),
+        
+        const SizedBox(height: 16),
+        const Text("INTEGRACIÓN CLOUD Y CANVA", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        DropdownButton<String>(
+          value: _selectedCloudProvider,
+          isExpanded: true,
+          dropdownColor: const Color(0xFF030509),
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+          underline: Container(height: 1, color: Colors.white10),
+          items: ["Google Drive", "OneDrive", "iCloud", "Canva Connect"]
+              .map((val) => DropdownMenuItem(value: val, child: Text(val)))
+              .toList(),
+          onChanged: (val) {
+            if (val != null) setState(() => _selectedCloudProvider = val);
+          },
+        ),
+
+        const SizedBox(height: 20),
+        const Text("HERRAMIENTAS BETA & PRO", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text("Modo Pro", style: TextStyle(fontSize: 12, color: Colors.white70)),
+          subtitle: const Text("Acceso a configuraciones experimentales", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          value: _isModoPro,
+          activeColor: activeColor,
+          onChanged: (val) => setState(() => _isModoPro = val),
+        ),
+        
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF0E1420),
+            foregroundColor: Colors.white,
+            minimumSize: const Size(double.infinity, 40),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Lanzando Editor Completo con IA (Beta)...")),
+            );
+          },
+          icon: const Icon(Icons.edit_note_rounded, size: 16),
+          label: const Text("Lanzar Editor IA", style: TextStyle(fontSize: 11)),
+        ),
+
+        const SizedBox(height: 20),
+        const Text("CONTROL DE ENTORNO LOCAL", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        
+        // Environment Assistant
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text("Asistente Virtual", style: TextStyle(fontSize: 12, color: Colors.white70)),
+          subtitle: const Text("Interactúa con dispositivos cercanos vía API", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          value: _environmentAssistant,
+          activeColor: activeColor,
+          onChanged: (val) => setState(() => _environmentAssistant = val),
+        ),
+        
+        // Web Mode Background Server
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text("Modo Web Servidor", style: TextStyle(fontSize: 12, color: Colors.white70)),
+          subtitle: const Text("Dejar la PC encendida y servir interfaz en la web", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          value: _isWebServerActive,
+          activeColor: activeColor,
+          onChanged: (val) => setState(() => _isWebServerActive = val),
+        ),
+        
+        if (_isWebServerActive) ...[
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.green.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.green.withOpacity(0.3)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.wifi_tethering_rounded, size: 12, color: Colors.green),
+                SizedBox(width: 6),
+                Text("Servidor Web Activo: http://192.168.1.100:8080", style: TextStyle(fontSize: 9, color: Colors.green, fontFamily: 'monospace')),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_threads.isEmpty) {
@@ -1412,6 +1778,7 @@ class _VantablackHomeState extends State<VantablackHome> {
               ),
             ),
           ),
+          _buildMatrixControlPanel(),
         ],
       ),
     );
