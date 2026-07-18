@@ -1,7 +1,7 @@
 name: vantablack_hub
 description: "Vantablack Hub by KAI IA - Matriz de variantes cognitivas locales."
 publish_to: 'none'
-version: 2.0.0+13
+version: 2.1.0+14
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
