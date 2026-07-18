@@ -444,6 +444,8 @@ class LocalLLMService {
       // Fallback local
       _isModelLoaded = true;
     }
+  }
+
   Stream<String> generateResponseStream(String input, Map<String, dynamic> variables) async* {
     // 1. Sanitizar la entrada local
     final cleanInput = input.trim().toLowerCase().replaceAll(' ', '');
