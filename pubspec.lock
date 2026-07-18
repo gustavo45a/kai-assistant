@@ -112,6 +112,22 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  google_mlkit_commons:
+    dependency: transitive
+    description:
+      name: google_mlkit_commons
+      sha256: "7e9a6d6e66b44aa8cfe944bda9bc3346c52486dd890ca49e5bc98845cda40d7f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.9.0"
+  google_mlkit_translation:
+    dependency: "direct main"
+    description:
+      name: google_mlkit_translation
+      sha256: "826cfe74fbee8f455d987949782e1873f50d79c1f2a971848e3f8dde851290d4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.12.0"
   http_parser:
     dependency: transitive
     description:
@@ -152,14 +168,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.0"
-  llama_cpp_dart:
-    dependency: "direct main"
-    description:
-      name: llama_cpp_dart
-      sha256: "2000a2be6c8eba0c8ff5cd9c3e253e666462238dd6b64e5012f9c1820be35806"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.0.9"
   matcher:
     dependency: transitive
     description:
@@ -389,14 +397,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.0"
-  typed_isolate:
-    dependency: transitive
-    description:
-      name: typed_isolate
-      sha256: e245b87368104f9da13a75268e0bce16a2a8d4c9a4194a5eb50bb569be680c65
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.0.0"
   uuid:
     dependency: "direct main"
     description:

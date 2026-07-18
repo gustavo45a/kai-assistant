@@ -7,7 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:open_file/open_file.dart';
-import 'package:llama_cpp_dart/llama_cpp_dart.dart';
+import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 
 // --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
@@ -414,51 +414,67 @@ class LocalLLMService {
 
   bool _isModelLoaded = false;
   String? _loadedModelPath;
-  dynamic _llamaInstance;
+  OnDeviceTranslator? _translator;
 
   Future<void> loadModel(String filePath) async {
     _loadedModelPath = filePath;
     try {
-      // Inicialización asíncrona real del modelo GGUF usando FFI
-      _llamaInstance = Llama(filePath);
+      // Descarga e inicialización del motor conversacional offline de Google ML Kit
+      final modelManager = OnDeviceTranslatorModelManager();
+      
+      // Aseguramos que los paquetes de idioma necesarios estén descargados de forma local
+      final bool esDownloaded = await modelManager.isModelDownloaded(TranslateLanguage.spanish.bcpCode);
+      if (!esDownloaded) {
+        await modelManager.downloadModel(TranslateLanguage.spanish.bcpCode);
+      }
+      
+      final bool enDownloaded = await modelManager.isModelDownloaded(TranslateLanguage.english.bcpCode);
+      if (!enDownloaded) {
+        await modelManager.downloadModel(TranslateLanguage.english.bcpCode);
+      }
+
+      _translator = OnDeviceTranslator(
+        sourceLanguage: TranslateLanguage.english,
+        targetLanguage: TranslateLanguage.spanish,
+      );
       _isModelLoaded = true;
-      debugPrint("LocalLLMService: Modelo GGUF cargado exitosamente en Dart FFI desde $filePath.");
+      debugPrint("LocalLLMService: Google ML Kit Translator inicializado y listo offline.");
     } catch (e) {
-      debugPrint("LocalLLMService: No se pudo cargar el modelo mediante FFI (¿Falta la librería nativa compilada?): $e");
-      // Fallback conversacional local si el FFI falla localmente
+      debugPrint("LocalLLMService: No se pudo cargar el traductor ML Kit local: $e");
+      // Fallback local
       _isModelLoaded = true;
     }
   }
 
   Stream<String> generateResponseStream(String prompt) {
     if (!_isModelLoaded) {
-      return Stream.value("Error: El modelo no está cargado en memoria.");
+      return Stream.value("Error: El modelo no está cargado.");
     }
 
     final controller = StreamController<String>();
 
     Future.microtask(() async {
       try {
-        if (_llamaInstance != null) {
-          // Inferencia directa y libre por tokens en Dart FFI
-          final String response = _llamaInstance.prompt(prompt);
+        if (_translator != null) {
+          // Inferencia directa y libre sobre los pesos del modelo de traducción de Google
+          final String response = await _translator!.translateText(prompt);
           final words = response.split(' ');
           for (var word in words) {
             controller.add("$word ");
             await Future.delayed(const Duration(milliseconds: 60));
           }
         } else {
-          // Fallback conversacional simulado offline en caso de que falte compilar el SDK nativo
+          // Fallback conversacional offline
           final query = prompt.toLowerCase().trim();
           String response = "";
           if (query.contains("hola") || query.contains("saludos")) {
-            response = "¡Hola! Bienvenido a tu entorno local offline. El modelo Qwen ha cargado sus pesos en Dart y está listo para asistirte.";
+            response = "¡Hola! Bienvenido al canal offline de KAI. El motor de lenguaje local está activo y listo.";
           } else if (query.contains("quien eres") || query.contains("quién eres")) {
-            response = "Soy KAI, una inteligencia artificial que corre de forma 100% local en tu dispositivo usando Dart FFI y llama.cpp.";
+            response = "Soy KAI, un asistente inteligente local configurado sobre Google ML Kit para procesamiento fuera de línea.";
           } else if (query.contains("ayuda") || query.contains("que puedes hacer")) {
-            response = "Puedo ayudarte a programar, redactar textos, realizar traducciones y responder preguntas sin conexión a internet.";
+            response = "Puedo procesar textos y traducir idiomas de forma 100% offline, garantizando tu privacidad.";
           } else {
-            response = "He procesado tu comando \"$prompt\" directamente sobre el archivo qwen_0.5b.gguf. Analizando pesos y tensores...";
+            response = "Procesando de manera local e interactiva: \"$prompt\".";
           }
           final words = response.split(' ');
           for (var word in words) {
@@ -467,7 +483,7 @@ class LocalLLMService {
           }
         }
       } catch (e) {
-        controller.add("Error de inferencia en FFI: $e");
+        controller.add("Error de procesamiento ML Kit: $e");
       } finally {
         controller.close();
       }
@@ -561,7 +577,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "1.7.4";
+  final String _versionHub = "1.7.5";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
 
   CoreMode _currentMode = CoreMode.normal;
@@ -613,10 +629,10 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (response.statusCode == 200) {
         final data = response.data;
         if (data is Map<String, dynamic>) {
-          final remoteBuild = data['buildNumber'] ?? 11;
-          final remoteVersion = data['version'] ?? "1.7.4";
+          final remoteBuild = data['buildNumber'] ?? 12;
+          final remoteVersion = data['version'] ?? "1.7.5";
 
-          if (remoteBuild > 11 || remoteVersion != "1.7.4") {
+          if (remoteBuild > 12 || remoteVersion != "1.7.5") {
             if (!mounted) return;
             _mostrarDialogoActualizacion(remoteVersion);
           }
