@@ -42,12 +42,6 @@ android {
             shrinkResources false
         }
     }
-
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-        }
-    }
 }
 
 flutter {
