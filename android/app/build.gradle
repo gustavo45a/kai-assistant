@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.zynoox.vantablack_hub" // Actualizado para que coincida con tu app
+    namespace = "com.tuproyecto.kai.kai_app" // Actualizado para que coincida con tu app
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -20,7 +20,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.zynoox.vantablack_hub"
+        applicationId "com.tuproyecto.kai.kai_app"
         // minSdk necesario para las APIs de almacenamiento seguro y OpenFile
         minSdkVersion 21
         targetSdkVersion 34
@@ -28,6 +28,8 @@ android {
         // Solución al error: Quemamos las versiones manualmente para Codespaces
         versionCode 1
         versionName "1.0.0"
+
+        multiDexEnabled true
     }
 
     buildTypes {
@@ -35,6 +37,9 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.debug
+
+            minifyEnabled false
+            shrinkResources false
         }
     }
 }

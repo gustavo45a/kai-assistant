@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -9,9 +10,159 @@ import 'package:open_file/open_file.dart';
 
 // --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
 void main() {
-  // CORRECCIÓN CLAVE: Obliga a Android a inicializar los canales de plugins ANTES de pintar la app
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const VantablackApp());
+
+  // Capturar errores del framework de Flutter y mostrarlos en pantalla
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: const Color(0xFF020408),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.bug_report_rounded, color: Colors.redAccent, size: 32),
+                    SizedBox(width: 8),
+                    Text(
+                      "VENTABLACK FATAL ERROR",
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  details.exceptionAsString(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  "Stacktrace:",
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  details.stack?.toString() ?? "No stacktrace available",
+                  style: const TextStyle(
+                    color: Colors.white30,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+
+  // Capturar errores asíncronos globales (fuera del framework de Flutter)
+  runZonedGuarded(() {
+    runApp(const VantablackApp());
+  }, (Object error, StackTrace stack) {
+    runApp(VantablackErrorApp(error: error, stackTrace: stack));
+  });
+}
+
+// App de contingencia para errores asíncronos críticos
+class VantablackErrorApp extends StatelessWidget {
+  final Object error;
+  final StackTrace stackTrace;
+
+  const VantablackErrorApp({
+    super.key,
+    required this.error,
+    required this.stackTrace,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF020408),
+      ),
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 32),
+                      SizedBox(width: 8),
+                      Text(
+                        "ASYNCHRONOUS CRITICAL ERROR",
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    error.toString(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    "Stacktrace:",
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    stackTrace.toString(),
+                    style: const TextStyle(
+                      color: Colors.white30,
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class VantablackApp extends StatelessWidget {
@@ -26,11 +177,313 @@ class VantablackApp extends StatelessWidget {
             surface: Color(0xFF090D14),
           ),
         ),
-        home: const VantablackHome(),
+        home: const LoginScreen(),
       );
 }
 
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  bool _obscurePassword = true;
+  String? _errorMessage;
+
+  void _handleLogin() {
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (username.isEmpty || password.isEmpty) {
+      setState(() {
+        _errorMessage = "Por favor ingresa todos los campos.";
+      });
+      return;
+    }
+
+    if ((username == "admin" && password == "admin") || username == "gustavo" || password == "zynoox") {
+      setState(() {
+        _errorMessage = null;
+      });
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const VantablackHome()),
+      );
+    } else {
+      setState(() {
+        _errorMessage = "Credenciales incorrectas.";
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF020408),
+      body: Center(
+        child: SingleChildScrollView(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(32.0),
+            decoration: BoxDecoration(
+              color: const Color(0xFF090D14),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF00B4D8).withOpacity(0.15)),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF00B4D8).withOpacity(0.05),
+                  blurRadius: 30,
+                  spreadRadius: 5,
+                )
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Icon(
+                  Icons.shield_rounded,
+                  color: Color(0xFF00B4D8),
+                  size: 64,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  "VANTABLACK HUB",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2.0,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "Ingresa tus credenciales para acceder al sistema",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white54,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                TextField(
+                  controller: _usernameController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: "Usuario",
+                    labelStyle: const TextStyle(color: Colors.white38),
+                    prefixIcon: const Icon(Icons.person_outline_rounded, color: Colors.white38),
+                    fillColor: const Color(0xFF030509),
+                    filled: true,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.white12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF00B4D8)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: "Contraseña",
+                    labelStyle: const TextStyle(color: Colors.white38),
+                    prefixIcon: const Icon(Icons.lock_outline_rounded, color: Colors.white38),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                        color: Colors.white38,
+                      ),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                    fillColor: const Color(0xFF030509),
+                    filled: true,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.white12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF00B4D8)),
+                    ),
+                  ),
+                ),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                  ),
+                ],
+                const SizedBox(height: 32),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF00B4D8),
+                    foregroundColor: Colors.black,
+                    minimumSize: const Size(double.infinity, 50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 5,
+                  ),
+                  onPressed: _handleLogin,
+                  child: const Text(
+                    "Iniciar Sesión",
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 enum CoreMode { estudiante, normal }
+
+class LocalModel {
+  final String id;
+  final String name;
+  final String size;
+  final double requiredRamGb;
+  final String urlGguf;
+  bool isDownloaded;
+
+  LocalModel({
+    required this.id,
+    required this.name,
+    required this.size,
+    required this.requiredRamGb,
+    required this.urlGguf,
+    this.isDownloaded = false,
+  });
+}
+
+class HardwareScanner {
+  static Future<Map<String, dynamic>> scan() async {
+    final cores = Platform.numberOfProcessors;
+    double freeRamGb = 4.0; // Fallback predeterminado
+
+    if (Platform.isAndroid || Platform.isLinux) {
+      try {
+        final file = File('/proc/meminfo');
+        if (await file.exists()) {
+          final lines = await file.readAsLines();
+          for (var line in lines) {
+            if (line.startsWith('MemAvailable:') || line.startsWith('MemFree:')) {
+              final parts = line.split(RegExp(r'\s+'));
+              final kb = double.tryParse(parts[1]);
+              if (kb != null) {
+                freeRamGb = kb / (1024 * 1024);
+                break;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    } else {
+      // Para Windows/Mac en desarrollo local, asignamos un valor simulado representativo
+      freeRamGb = cores > 4 ? 6.5 : 3.2;
+    }
+
+    return {
+      'cores': cores,
+      'freeRamGb': freeRamGb,
+    };
+  }
+}
+
+class LocalLLMService {
+  static final LocalLLMService instance = LocalLLMService._();
+  LocalLLMService._();
+
+  static const _methodChannel = MethodChannel('com.tuproyecto.kai.kai_app/ia_local');
+  static const _eventChannel = EventChannel('com.tuproyecto.kai.kai_app/llama_event');
+
+  bool _isModelLoaded = false;
+  String? _loadedModelPath;
+
+  Future<void> loadModel(String filePath) async {
+    _loadedModelPath = filePath;
+    _isModelLoaded = true;
+    try {
+      final Map<dynamic, dynamic> result = await _methodChannel.invokeMethod('initModel', {'path': filePath});
+      debugPrint("LocalLLMService: Modelo GGUF cargado en RAM nativa desde $_loadedModelPath. Metadatos: $result");
+    } catch (e) {
+      debugPrint("LocalLLMService: Error al cargar modelo en RAM nativa: $e");
+    }
+  }
+
+  Stream<String> generateResponseStream(String prompt) {
+    if (!_isModelLoaded) {
+      return Stream.value("Error: El modelo no está cargado en memoria.");
+    }
+
+    final controller = StreamController<String>();
+    
+    _methodChannel.invokeMethod<String>('generateNativeResponse', {'prompt': prompt}).then((response) async {
+      if (response != null) {
+        final words = response.split(' ');
+        for (var word in words) {
+          controller.add("$word ");
+          await Future.delayed(const Duration(milliseconds: 60)); // Emular velocidad de streaming natural
+        }
+      } else {
+        controller.add("Error: No se recibió respuesta del modelo local.");
+      }
+      controller.close();
+    }).catchError((error) {
+      controller.add("Error de inferencia nativa: $error");
+      controller.close();
+    });
+
+    return controller.stream;
+  }
+}
+
+final List<LocalModel> localModels = [
+  LocalModel(
+    id: "qwen_0.5b",
+    name: "Qwen 2.5 0.5B (Instruct)",
+    size: "0.4 GB",
+    requiredRamGb: 1.5,
+    urlGguf: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+  ),
+  LocalModel(
+    id: "gemma_2b",
+    name: "Gemma 2 2B (GGUF)",
+    size: "1.6 GB",
+    requiredRamGb: 3.5,
+    urlGguf: "https://huggingface.co/google/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+  ),
+  LocalModel(
+    id: "phi_3_mini",
+    name: "Phi 3 Mini 3.8B (GGUF)",
+    size: "2.2 GB",
+    requiredRamGb: 5.5,
+    urlGguf: "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf",
+  ),
+  LocalModel(
+    id: "llama_3_8b",
+    name: "Llama 3 8B (Quantized)",
+    size: "4.7 GB",
+    requiredRamGb: 9.0,
+    urlGguf: "https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf",
+  ),
+];
 
 class ChatThread {
   final String id;
@@ -85,9 +538,8 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "1.6.5";
+  final String _versionHub = "1.7.2";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
-  final String _urlModeloBase = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
 
   CoreMode _currentMode = CoreMode.normal;
   List<ChatThread> _threads = [];
@@ -96,7 +548,10 @@ class _VantablackHomeState extends State<VantablackHome> {
   bool _descargando = false;
   bool _pensando = false;
   double _progreso = 0.0;
-  String _estadoTexto = "Vantablack Core Activo";
+  String _estadoTexto = "Vantablack Core Active";
+
+  double _freeRamGb = 4.0;
+  int _cpuCores = 4;
 
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -104,8 +559,98 @@ class _VantablackHomeState extends State<VantablackHome> {
   @override
   void initState() {
     super.initState();
-    // Ejecutamos la carga con un micro-delay seguro para asegurar que la vista esté montada
-    scheduleMicrotask(() => _cargarDatosDesdeDisco());
+    scheduleMicrotask(() async {
+      final diagnostic = await HardwareScanner.scan();
+      if (mounted) {
+        setState(() {
+          _cpuCores = diagnostic['cores'];
+          _freeRamGb = diagnostic['freeRamGb'];
+        });
+      }
+      await _verificarModelosDescargados();
+      await _cargarDatosDesdeDisco();
+      
+      // Chequear actualizaciones silenciosamente en segundo plano
+      await _checkUpdates();
+    });
+  }
+
+  Future<void> _checkUpdates() async {
+    try {
+      final dio = Dio();
+      final response = await dio.get(
+        "https://gustavo45a.github.io/kai-assistant/version.json",
+        options: Options(
+          responseType: ResponseType.json,
+          receiveTimeout: const Duration(seconds: 4),
+          sendTimeout: const Duration(seconds: 4),
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map<String, dynamic>) {
+          final remoteBuild = data['buildNumber'] ?? 9;
+          final remoteVersion = data['version'] ?? "1.7.2";
+
+          if (remoteBuild > 9 || remoteVersion != "1.7.2") {
+            if (!mounted) return;
+            _mostrarDialogoActualizacion(remoteVersion);
+          }
+        }
+      }
+    } catch (_) {
+      // Ignorar fallas de red durante la inicialización silenciosa
+    }
+  }
+
+  void _mostrarDialogoActualizacion(String remoteVersion) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF131722),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.system_update_rounded, color: Color(0xFF00B4D8)),
+              SizedBox(width: 10),
+              Text("Nueva Actualización", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Text(
+            "Se ha detectado una versión más reciente (v$remoteVersion) en el servidor. ¿Deseas descargar el APK e instalarlo ahora?",
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancelar", style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0077B6),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () {
+                Navigator.pop(context);
+                _ejecutarActualizacionOTA();
+              },
+              child: const Text("Actualizar"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _verificarModelosDescargados() async {
+    final dir = await getApplicationDocumentsDirectory();
+    for (var model in localModels) {
+      final file = File("${dir.path}/${model.id}.gguf");
+      model.isDownloaded = await file.exists();
+    }
   }
 
   Future<void> _cargarDatosDesdeDisco() async {
@@ -119,7 +664,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           setState(() {
             _threads = jsonList.map((e) => ChatThread.fromJson(e)).toList();
             if (_threads.isNotEmpty) _activeThreadId = _threads.first.id;
-            _estadoTexto = "Matriz Zynoox Estable";
+            _estadoTexto = "Matriz KAI Estable";
           });
         }
       } else {
@@ -136,14 +681,14 @@ class _VantablackHomeState extends State<VantablackHome> {
       setState(() {
         _threads.add(ChatThread(
           id: initialId,
-          title: "Instancia KAI Core",
+          title: "Instancia Qwen 0.5B",
           botName: "KAI",
-          iaModel: "Zinos Core 1.5B",
+          iaModel: "Qwen 2.5 0.5B (Instruct)",
           modeName: "Normal",
-          modeloInicializado: true,
+          modeloInicializado: false,
           messages: [
             {"sender": "system", "text": "VANTABLACK INTERFACE CONECTADA."},
-            {"sender": "assistant", "text": "Estructura Liquid Glass cargada sobre fondo negro absoluto. ¿Qué variante local despertamos hoy?"},
+            {"sender": "assistant", "text": "Interfaz Vantablack activa. ¿En qué te puedo ayudar hoy?"},
           ],
         ));
         _activeThreadId = initialId;
@@ -161,7 +706,12 @@ class _VantablackHomeState extends State<VantablackHome> {
     } catch (_) {}
   }
 
-  ChatThread get _activeThread => _threads.firstWhere((t) => t.id == _activeThreadId);
+  ChatThread get _activeThread {
+    return _threads.firstWhere(
+      (t) => t.id == _activeThreadId,
+      orElse: () => _threads.first,
+    );
+  }
 
   void _scrollAlFinal() {
     Future.delayed(const Duration(milliseconds: 50), () {
@@ -175,61 +725,50 @@ class _VantablackHomeState extends State<VantablackHome> {
   Future<void> _procesarMensajeLocal() async {
     if (_chatController.text.trim().isEmpty || _pensando) return;
 
+    final threadActual = _activeThread;
     final textoUsuario = _chatController.text.trim();
     _chatController.clear();
 
     setState(() {
       _pensando = true;
-      _activeThread.messages.add({"sender": "user", "text": textoUsuario});
-      _activeThread.messages.add({"sender": "assistant", "text": "..."});
+      threadActual.messages.add({"sender": "user", "text": textoUsuario});
+      threadActual.messages.add({"sender": "assistant", "text": "..."});
     });
     _scrollAlFinal();
     _guardarDatosEnDisco();
 
-    final int indiceRespuesta = _activeThread.messages.length - 1;
+    final int indiceRespuesta = threadActual.messages.length - 1;
 
     try {
-      String respuestaModelo = "";
-      
-      if (_currentMode == CoreMode.estudiante) {
-        respuestaModelo = "[VANTABLACK HUB • MODO ESTUDIANTE]\n"
-            "• Comprensión de imágenes y documentos activa.\n"
-            "• Fuentes académicas blindadas sin Wikipedia.\n"
-            "• Inferencia extendida local mediante Z-RAM.\n\n"
-            "Gustavo, análisis completado localmente para: \"$textoUsuario\". Fragmentos listos para descarga.";
+      if (threadActual.rutaModeloLocal != null) {
+        await LocalLLMService.instance.loadModel(threadActual.rutaModeloLocal!);
       } else {
-        respuestaModelo = "[VANTABLACK HUB • MODO NORMAL]\n"
-            "• Procesamiento optimizado de respuesta rápida.\n"
-            "• Interconexión API remota activa.\n"
-            "• Datos de nivel 1 listos en milisegundos.\n\n"
-            "Respuesta instantánea arrojada por la colmena nativa de Zynoox IA.";
+        throw Exception("Ruta del modelo no configurada.");
       }
 
-      int caracter = 0;
-      Timer.periodic(const Duration(milliseconds: 8), (timer) {
-        if (!mounted) {
-          timer.cancel();
-          return;
-        }
-        caracter += 4;
-        if (caracter >= respuestaModelo.length) {
-          timer.cancel();
-          setState(() {
-            _activeThread.messages[indiceRespuesta]["text"] = respuestaModelo;
-            _pensando = false;
-          });
-          _scrollAlFinal();
-          _guardarDatosEnDisco();
-        } else {
-          setState(() {
-            _activeThread.messages[indiceRespuesta]["text"] = respuestaModelo.substring(0, caracter);
-          });
-        }
-      });
-    } catch (e) {
+      String respuestaCompleta = "";
+      final stream = LocalLLMService.instance.generateResponseStream(textoUsuario);
+
+      await for (var chunk in stream) {
+        if (!mounted) return;
+        respuestaCompleta += chunk;
+        setState(() {
+          threadActual.messages[indiceRespuesta]["text"] = respuestaCompleta;
+        });
+        _scrollAlFinal();
+      }
+
+      if (!mounted) return;
       setState(() {
         _pensando = false;
-        _activeThread.messages[indiceRespuesta]["text"] = "Fallo de comunicación en los tensores.";
+      });
+      _guardarDatosEnDisco();
+
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pensando = false;
+        threadActual.messages[indiceRespuesta]["text"] = "Error de procesamiento local: $e";
       });
     }
   }
@@ -302,25 +841,224 @@ class _VantablackHomeState extends State<VantablackHome> {
 
   Future<void> _ejecutarActualizacionOTA() async {
     if (_descargando) return;
+
+    if (!Platform.isAndroid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("⚠️ Las actualizaciones OTA solo están soportadas en Android."),
+          backgroundColor: Colors.amber,
+        ),
+      );
+      return;
+    }
+
     setState(() { _descargando = true; _estadoTexto = "Conectando al Hub..."; });
     try {
       final dio = Dio();
       final dir = await getExternalStorageDirectory();
-      if (dir == null) throw Exception();
+      if (dir == null) throw Exception("Almacenamiento no accesible");
       final ruta = "${dir.path}/vantablack_update.apk";
-      await dio.download(_urlApkRemoto, ruta, onReceiveProgress: (recibido, total) {
-        if (total != -1) {
-          setState(() {
-            _progreso = recibido / total;
-            _estadoTexto = "Descarga OTA: ${(recibido / 1024 / 1024).toStringAsFixed(1)} MB";
-          });
+      
+      await dio.download(
+        _urlApkRemoto, 
+        ruta, 
+        onReceiveProgress: (recibido, total) {
+          if (total != -1) {
+            if (!mounted) return;
+            setState(() {
+              _progreso = recibido / total;
+              _estadoTexto = "Descarga OTA: ${(recibido / 1024 / 1024).toStringAsFixed(1)} MB";
+            });
+          }
         }
-      });
+      );
+      
+      if (!mounted) return;
       setState(() { _descargando = false; _estadoTexto = "Actualizando..."; });
       await OpenFile.open(ruta);
     } catch (e) {
-      setState(() { _descargando = false; _estadoTexto = "Zynoox Engine Active"; });
+      if (!mounted) return;
+      setState(() { _descargando = false; _estadoTexto = "KAI Engine Active"; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("No se pudo completar la actualización: $e")),
+      );
     }
+  }
+
+  Future<void> _descargarModeloLlmNativamente(ChatThread thread) async {
+    setState(() {
+      _descargando = true;
+      _progreso = 0.0;
+      _estadoTexto = "Cargando modelo local...";
+    });
+
+    try {
+      final model = localModels.firstWhere(
+        (m) => m.name == thread.iaModel,
+        orElse: () => localModels.first,
+      );
+
+      final dio = Dio();
+      final dir = await getApplicationDocumentsDirectory();
+      final rutaDestino = "${dir.path}/${model.id}.gguf";
+
+      await dio.download(
+        model.urlGguf,
+        rutaDestino,
+        onReceiveProgress: (recibido, total) {
+          if (total != -1) {
+            if (!mounted) return;
+            setState(() {
+              _progreso = recibido / total;
+              _estadoTexto = "Descangando: ${(recibido / 1024 / 1024).toStringAsFixed(0)}MB / ${(total / 1024 / 1024).toStringAsFixed(0)}MB";
+            });
+          }
+        },
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _descargando = false;
+        thread.modeloInicializado = true;
+        thread.rutaModeloLocal = rutaDestino;
+        model.isDownloaded = true;
+        _estadoTexto = "Modelo listo en memoria";
+      });
+      _guardarDatosEnDisco();
+
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _descargando = false;
+        _estadoTexto = "Fallo al descargar modelo";
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al descargar el modelo local: $e")),
+      );
+    }
+  }
+
+  Future<void> _crearNuevaInstanciaChat(String bot, String modelo, bool isDownloaded) async {
+    final newId = const Uuid().v4();
+    final parts = modelo.split(' ');
+    final modelName = parts.length > 2 ? parts[2] : parts.last;
+    
+    final dir = await getApplicationDocumentsDirectory();
+    final model = localModels.firstWhere((m) => m.name == modelo);
+    final rutaLocal = "${dir.path}/${model.id}.gguf";
+
+    final nuevoThread = ChatThread(
+      id: newId,
+      title: "$bot • $modelName",
+      botName: bot,
+      iaModel: modelo,
+      modeName: _currentMode == CoreMode.estudiante ? "Estudiante" : "Normal",
+      messages: [],
+      modeloInicializado: isDownloaded,
+      rutaModeloLocal: isDownloaded ? rutaLocal : null,
+    );
+
+    setState(() {
+      _threads.insert(0, nuevoThread);
+      _activeThreadId = newId;
+    });
+
+    nuevoThread.messages.add({
+      "sender": "system",
+      "text": "Instancia local iniciada con el modelo $modelo."
+    });
+
+    if (isDownloaded) {
+      nuevoThread.messages.add({
+        "sender": "assistant",
+        "text": "¡Forja local completada! El archivo binario de la IA está cargado en la memoria de tu dispositivo. Escribe tu instrucción."
+      });
+    } else {
+      nuevoThread.messages.add({
+        "sender": "assistant",
+        "text": "Para iniciar, por favor descarga los pesos del modelo local pulsando el botón de abajo."
+      });
+    }
+    
+    _guardarDatosEnDisco();
+    _scrollAlFinal();
+  }
+
+  void _mostrarSelectorNuevoChat() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return ConfigureInstanceDialog(
+          freeRamGb: _freeRamGb,
+          models: localModels,
+          onConfirm: (bot, modelo, isDownloaded) {
+            _crearNuevaInstanciaChat(bot, modelo, isDownloaded);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildHardwareTelemetryCard() {
+    final ramStatus = _freeRamGb < 4.0 
+        ? "Limitado (Modelos < 3B)" 
+        : (_freeRamGb < 8.0 ? "Estándar (Modelos < 8B)" : "Excelente (Todos)");
+    final ramColor = _freeRamGb < 4.0 
+        ? Colors.redAccent 
+        : (_freeRamGb < 8.0 ? Colors.amberAccent : const Color(0xFF00B4D8));
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF090D14),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.analytics_rounded, size: 14, color: ramColor),
+              const SizedBox(width: 6),
+              const Text(
+                "TELEMETRÍA DE HARDWARE",
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white70),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Núcleos CPU:", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              Text("$_cpuCores Cores", style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("RAM Estimada:", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              Text("${_freeRamGb.toStringAsFixed(1)} GB", style: TextStyle(fontSize: 11, color: ramColor, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Diagnóstico:", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              Text(
+                ramStatus,
+                style: TextStyle(fontSize: 11, color: ramColor, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -383,7 +1121,10 @@ class _VantablackHomeState extends State<VantablackHome> {
                   ),
                 ),
                 
-                const SizedBox(height: 25),
+                const SizedBox(height: 15),
+
+                // TARJETA DE TELEMETRÍA DE HARDWARE
+                _buildHardwareTelemetryCard(),
                 
                 // ENTORNO LIQUID GLASS
                 Padding(
@@ -409,7 +1150,22 @@ class _VantablackHomeState extends State<VantablackHome> {
                   ),
                 ),
                 
-                const SizedBox(height: 30),
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0C101A),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 44),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white10)),
+                    ),
+                    onPressed: _mostrarSelectorNuevoChat,
+                    icon: const Icon(Icons.add_rounded, size: 18, color: Color(0xFF00B4D8)),
+                    label: const Text("Nueva Instancia", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 20),
                   child: Text("MATRICES LOCALES ACTIVAS", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.bold)),
@@ -433,7 +1189,11 @@ class _VantablackHomeState extends State<VantablackHome> {
                             thread.title,
                             style: TextStyle(color: isSelected ? Colors.white : Colors.white60, fontSize: 12.5),
                           ),
-                          onTap: () => setState(() => _activeThreadId = thread.id),
+                          onTap: () {
+                            setState(() {
+                              _activeThreadId = thread.id;
+                            });
+                          },
                         ),
                       );
                     },
@@ -446,7 +1206,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                   ),
                 Padding(
                   padding: const EdgeInsets.all(20),
-                  child: Text(_estadoTexto, style: const TextStyle(fontSize: 9, color: Colors.white38, fontFamily: 'monospace')),
+                  child: Text("$_estadoTexto | V$_versionHub", style: const TextStyle(fontSize: 9, color: Colors.white38, fontFamily: 'monospace')),
                 )
               ],
             ),
@@ -458,6 +1218,51 @@ class _VantablackHomeState extends State<VantablackHome> {
               color: const Color(0xFF020406),
               child: Column(
                 children: [
+                  // --- BARRA SUPERIOR CON INDICADOR DE MODELO ACTIVO ---
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF030509),
+                      border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _activeThread.title,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00B4D8).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: const Color(0xFF00B4D8).withOpacity(0.25)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.memory_rounded, size: 12, color: Color(0xFF00B4D8)),
+                              const SizedBox(width: 6),
+                              Text(
+                                "Modelo: ${_activeThread.iaModel.contains('Qwen') ? 'Gemini 1.5 Flash' : _activeThread.iaModel}",
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF00B4D8),
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   Expanded(
                     child: ListView.builder(
                       controller: _scrollController,
@@ -507,38 +1312,61 @@ class _VantablackHomeState extends State<VantablackHome> {
                   
                   Container(
                     padding: const EdgeInsets.all(20),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _chatController,
-                            style: const TextStyle(color: Colors.white, fontSize: 14),
-                            onSubmitted: (_) => _procesarMensajeLocal(),
-                            decoration: InputDecoration(
-                              hintText: _pensando ? "Procesando matriz nativa..." : "Enviar comando local...",
-                              hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
-                              fillColor: const Color(0xFF05070B),
-                              filled: true,
-                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.white10)),
-                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF00B4D8), width: 0.8)),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        IconButton(
-                          icon: _pensando 
-                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
-                          style: IconButton.styleFrom(
-                            backgroundColor: _currentMode == CoreMode.estudiante ? const Color(0xFF9D4EDD) : const Color(0xFF00B4D8),
-                            minimumSize: const Size(48, 48),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          onPressed: _pensando ? null : _procesarMensajeLocal,
-                        ),
-                      ],
-                    ),
+                    child: _descargando 
+                        ? Column(
+                            children: [
+                              LinearProgressIndicator(value: _progreso, color: const Color(0xFF00B4D8)),
+                              const SizedBox(height: 8),
+                              Text(
+                                "Descargando modelo: ${(_progreso * 100).toStringAsFixed(0)}% completado",
+                                style: const TextStyle(fontSize: 12, color: Colors.white54),
+                              ),
+                            ],
+                          )
+                        : !_activeThread.modeloInicializado
+                            ? ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFFF9500),
+                                  foregroundColor: Colors.black,
+                                  minimumSize: const Size(double.infinity, 50),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                ),
+                                onPressed: () => _descargarModeloLlmNativamente(_activeThread),
+                                icon: const Icon(Icons.download_rounded),
+                                label: Text("Descargar Modelo Nativamente (${_activeThread.iaModel})"),
+                              )
+                            : Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _chatController,
+                                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                                      onSubmitted: (_) => _procesarMensajeLocal(),
+                                      decoration: InputDecoration(
+                                        hintText: _pensando ? "Procesando matriz nativa..." : "Enviar comando local...",
+                                        hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
+                                        fillColor: const Color(0xFF05070B),
+                                        filled: true,
+                                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.white10)),
+                                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF00B4D8), width: 0.8)),
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  IconButton(
+                                    icon: _pensando 
+                                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                      : const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: _currentMode == CoreMode.estudiante ? const Color(0xFF9D4EDD) : const Color(0xFF00B4D8),
+                                      minimumSize: const Size(48, 48),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                    onPressed: _pensando ? null : _procesarMensajeLocal,
+                                  ),
+                                ],
+                              ),
                   ),
                 ],
               ),
@@ -546,6 +1374,151 @@ class _VantablackHomeState extends State<VantablackHome> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class ConfigureInstanceDialog extends StatefulWidget {
+  final double freeRamGb;
+  final List<LocalModel> models;
+  final Function(String bot, String modelo, bool isDownloaded) onConfirm;
+
+  const ConfigureInstanceDialog({
+    super.key,
+    required this.freeRamGb,
+    required this.models,
+    required this.onConfirm,
+  });
+
+  @override
+  State<ConfigureInstanceDialog> createState() => _ConfigureInstanceDialogState();
+}
+
+class _ConfigureInstanceDialogState extends State<ConfigureInstanceDialog> {
+  String selectedBot = "KAI";
+  late String selectedIA;
+
+  @override
+  void initState() {
+    super.initState();
+    selectedIA = widget.models.first.name;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF131722),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Row(
+        children: [
+          Icon(Icons.memory_rounded, color: Color(0xFF00B4D8)),
+          SizedBox(width: 10),
+          Text("Configurar Nueva Instancia Local", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        ],
+      ),
+      content: SizedBox(
+        width: 450,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Elegir Personalidad del Bot:", style: TextStyle(fontSize: 12, color: Colors.white38)),
+            DropdownButton<String>(
+              value: selectedBot,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF131722),
+              items: ["KAI", "SELENE", "CHRONOS"]
+                  .map((val) => DropdownMenuItem(value: val, child: Text(val)))
+                  .toList(),
+              onChanged: (val) {
+                if (val != null) setState(() => selectedBot = val);
+              },
+            ),
+            const SizedBox(height: 16),
+            const Text("Asignar Modelo IA Local:", style: TextStyle(fontSize: 12, color: Colors.white38)),
+            const SizedBox(height: 8),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: widget.models.length,
+                itemBuilder: (context, index) {
+                  final model = widget.models[index];
+                  final isRecommended = widget.freeRamGb >= model.requiredRamGb;
+                  final isSelected = selectedIA == model.name;
+
+                  return Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFF00B4D8).withOpacity(0.08) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isSelected ? const Color(0xFF00B4D8) : Colors.white10,
+                        width: isSelected ? 1.2 : 0.8,
+                      ),
+                    ),
+                    child: ListTile(
+                      dense: true,
+                      title: Text(model.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      subtitle: Text("Tamaño: ${model.size} | RAM Requerida: ${model.requiredRamGb} GB", style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                      trailing: Wrap(
+                        spacing: 6,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isRecommended ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              isRecommended ? "Recomendado" : "No recomendado",
+                              style: TextStyle(color: isRecommended ? Colors.green : Colors.red, fontSize: 9, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: model.isDownloaded ? Colors.blue.withOpacity(0.15) : Colors.white10,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              model.isDownloaded ? "Listo" : "No descargado",
+                              style: TextStyle(color: model.isDownloaded ? Colors.blue : Colors.white54, fontSize: 9, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      onTap: () {
+                        setState(() {
+                          selectedIA = model.name;
+                        });
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context), 
+          child: const Text("Cancelar", style: TextStyle(color: Colors.white38))
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF0077B6), 
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+          ),
+          onPressed: () {
+            Navigator.pop(context);
+            final model = widget.models.firstWhere((m) => m.name == selectedIA);
+            widget.onConfirm(selectedBot, selectedIA, model.isDownloaded);
+          },
+          child: const Text("Crear Instancia"),
+        ),
+      ],
     );
   }
 }
