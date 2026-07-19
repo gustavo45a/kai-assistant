@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:open_file/open_file.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
+import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 
 
 // --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
@@ -409,61 +410,70 @@ class HardwareScanner {
 }
 
 class LocalLLMService {
-  static const MethodChannel _channel = MethodChannel('com.vantablack.hub/llm_engine');
-
   // Singleton
   static final LocalLLMService instance = LocalLLMService._internal();
   LocalLLMService._internal();
 
+  LlamaParent? _llamaParent;
   bool _isModelLoaded = false;
   String _modelPath = '';
 
   /// Descarga el modelo real desde el repositorio o verifica su existencia en disco
-  Future<void> initializeRealModel() async {
-    final directory = await getApplicationDocumentsDirectory();
-    _modelPath = '${directory.path}/qwen_0.5b_instruct_q4.gguf';
+  Future<void> initializeRealModel(String path) async {
+    if (_isModelLoaded && _modelPath == path && _llamaParent != null) {
+      return; // Ya está cargado en memoria
+    }
 
-    final file = File(_modelPath);
+    final file = File(path);
     if (!await file.exists()) {
-      // Directiva a la UI para disparar el flujo de descarga nativa desde la URL de Hugging Face
       throw Exception("Modelo local no encontrado en el almacenamiento. Requiere descarga inicial.");
     }
 
-    // Carga el modelo en los 8 núcleos del procesador local
-    final bool success = await _channel.invokeMethod('loadModel', {'path': _modelPath});
-    _isModelLoaded = success;
+    // Liberar recursos previos si los hubiera
+    if (_llamaParent != null) {
+      await _llamaParent!.dispose();
+      _llamaParent = null;
+    }
+
+    _modelPath = path;
+
+    // Configurar la carga en un Isolate secundario para no bloquear el hilo de UI
+    final loadCommand = LlamaLoad(
+      path: _modelPath,
+      modelParams: ModelParams()..nGpuLayers = 0, // Ejecutar en CPU (seguro para móviles)
+      contextParams: ContextParams()..nCtx = 2048..nBatch = 512,
+      samplingParams: SamplerParams(),
+      format: ChatMLFormat(), // Formato estándar de chat compatible
+    );
+
+    _llamaParent = LlamaParent(loadCommand);
+    await _llamaParent!.init();
+    _isModelLoaded = true;
   }
 
-  /// Inferencia dinámica real por medio de streaming de tokens
+  /// Inferencia dinámica real por medio de streaming de tokens usando llama.cpp
   Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables) async* {
-    if (!_isModelLoaded) {
+    if (!_isModelLoaded || _llamaParent == null) {
       yield "[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.";
       return;
     }
 
     final StreamController<String> controller = StreamController<String>();
 
-    // Configuración dinámica basada en los toggles reales de la UI
-    final Map<String, dynamic> options = {
-      'prompt': prompt,
-      'temperature': variables['isModoPro'] == true ? 0.7 : 0.2,
-      'threads': 8, // Forzar uso total de los 8 cores detectados
-      'zram': variables['isZRamEnabled'] == true,
-    };
-
-    // Escuchar el flujo nativo de tokens generados por la red neuronal
-    _channel.invokeMethod('startInference', options);
-
-    // Simulación del puente del canal receptor de eventos nativos
-    const EventChannel('com.vantablack.hub/llm_stream').receiveBroadcastStream().listen((token) {
-      controller.add(token.toString());
+    final subscription = _llamaParent!.stream.listen((token) {
+      controller.add(token);
     }, onError: (err) {
       controller.addError(err);
     }, onDone: () {
       controller.close();
     });
 
+    // Enviar instrucción al modelo
+    _llamaParent!.sendPrompt(prompt);
+
     yield* controller.stream;
+
+    await subscription.cancel();
   }
 }
 
@@ -765,8 +775,16 @@ class _VantablackHomeState extends State<VantablackHome> {
     final int indiceRespuesta = threadActual.messages.length - 1;
 
     try {
+      // Resolver la ruta real del modelo seleccionado dinámicamente
+      final directory = await getApplicationDocumentsDirectory();
+      final modelInfo = localModels.firstWhere(
+        (m) => m.name == threadActual.iaModel,
+        orElse: () => localModels.first,
+      );
+      final rutaModelo = "${directory.path}/${modelInfo.id}.gguf";
+
       // Inicializar el modelo nativo real
-      await LocalLLMService.instance.initializeRealModel();
+      await LocalLLMService.instance.initializeRealModel(rutaModelo);
 
       String respuestaCompleta = "";
       final stream = LocalLLMService.instance.generateResponseStream(
