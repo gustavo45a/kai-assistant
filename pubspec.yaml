@@ -1,7 +1,7 @@
 name: vantablack_hub
 description: "Vantablack Hub by KAI IA - Matriz de variantes cognitivas locales."
 publish_to: 'none'
-version: 2.3.1+18
+version: 2.3.2+19
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -14,7 +14,6 @@ dependencies:
   uuid: ^4.3.3
   open_file: ^3.3.2
   google_mlkit_translation: ^0.12.0
-  llama_cpp_dart: ^0.0.9
 
 dev_dependencies:
   flutter_test:

@@ -168,14 +168,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.0"
-  llama_cpp_dart:
-    dependency: "direct main"
-    description:
-      name: llama_cpp_dart
-      sha256: "2000a2be6c8eba0c8ff5cd9c3e253e666462238dd6b64e5012f9c1820be35806"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.0.9"
   matcher:
     dependency: transitive
     description:
@@ -405,14 +397,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.0"
-  typed_isolate:
-    dependency: transitive
-    description:
-      name: typed_isolate
-      sha256: e245b87368104f9da13a75268e0bce16a2a8d4c9a4194a5eb50bb569be680c65
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.0.0"
   uuid:
     dependency: "direct main"
     description:

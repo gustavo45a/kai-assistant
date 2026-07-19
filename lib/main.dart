@@ -8,7 +8,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:open_file/open_file.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
-import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 
 
 // --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
@@ -410,17 +409,18 @@ class HardwareScanner {
 }
 
 class LocalLLMService {
+  static const MethodChannel _channel = MethodChannel('com.vantablack.hub/llm_engine');
+
   // Singleton
   static final LocalLLMService instance = LocalLLMService._internal();
   LocalLLMService._internal();
 
-  LlamaParent? _llamaParent;
   bool _isModelLoaded = false;
   String _modelPath = '';
 
   /// Descarga el modelo real desde el repositorio o verifica su existencia en disco
   Future<void> initializeRealModel(String path) async {
-    if (_isModelLoaded && _modelPath == path && _llamaParent != null) {
+    if (_isModelLoaded && _modelPath == path) {
       return; // Ya está cargado en memoria
     }
 
@@ -429,51 +429,44 @@ class LocalLLMService {
       throw Exception("Modelo local no encontrado en el almacenamiento. Requiere descarga inicial.");
     }
 
-    // Liberar recursos previos si los hubiera
-    if (_llamaParent != null) {
-      await _llamaParent!.dispose();
-      _llamaParent = null;
-    }
-
     _modelPath = path;
 
-    // Configurar la carga en un Isolate secundario para no bloquear el hilo de UI
-    final loadCommand = LlamaLoad(
-      path: _modelPath,
-      modelParams: ModelParams()..nGpuLayers = 0, // Ejecutar en CPU (seguro para móviles)
-      contextParams: ContextParams()..nCtx = 2048..nBatch = 512,
-      samplingParams: SamplerParams(),
-      format: ChatMLFormat(), // Formato estándar de chat compatible
-    );
-
-    _llamaParent = LlamaParent(loadCommand);
-    await _llamaParent!.init();
-    _isModelLoaded = true;
+    // Carga el modelo en los 8 núcleos del procesador local
+    final bool? success = await _channel.invokeMethod<bool>('loadModel', {'path': _modelPath})
+        .timeout(const Duration(seconds: 60));
+    _isModelLoaded = success == true;
   }
 
-  /// Inferencia dinámica real por medio de streaming de tokens usando llama.cpp
+  /// Inferencia dinámica real por medio de streaming de tokens
   Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables) async* {
-    if (!_isModelLoaded || _llamaParent == null) {
+    if (!_isModelLoaded) {
       yield "[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.";
       return;
     }
 
     final StreamController<String> controller = StreamController<String>();
 
-    final subscription = _llamaParent!.stream.listen((token) {
-      controller.add(token);
+    // Configuración dinámica basada en los toggles reales de la UI
+    final Map<String, dynamic> options = {
+      'prompt': prompt,
+      'temperature': variables['isModoPro'] == true ? 0.7 : 0.2,
+      'threads': 8, // Forzar uso total de los 8 cores detectados
+      'zram': variables['isZRamEnabled'] == true,
+    };
+
+    // Escuchar el flujo nativo de tokens generados por la red neuronal
+    _channel.invokeMethod('startInference', options);
+
+    // Simulación del puente del canal receptor de eventos nativos
+    const EventChannel('com.vantablack.hub/llm_stream').receiveBroadcastStream().listen((token) {
+      controller.add(token.toString());
     }, onError: (err) {
       controller.addError(err);
     }, onDone: () {
       controller.close();
     });
 
-    // Enviar instrucción al modelo
-    _llamaParent!.sendPrompt(prompt);
-
     yield* controller.stream;
-
-    await subscription.cancel();
   }
 }
 
@@ -561,7 +554,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "2.3.1";
+  final String _versionHub = "2.3.2";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
 
   CoreMode _currentMode = CoreMode.normal;
