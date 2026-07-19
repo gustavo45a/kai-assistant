@@ -2,11 +2,11 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:open_file/open_file.dart';
+import 'package:llama_flutter_android/llama_flutter_android.dart';
 
 
 // --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
@@ -408,12 +408,11 @@ class HardwareScanner {
 }
 
 class LocalLLMService {
-  static const MethodChannel _channel = MethodChannel('com.vantablack.hub/llm_engine');
-
   // Singleton
   static final LocalLLMService instance = LocalLLMService._internal();
   LocalLLMService._internal();
 
+  final LlamaController _controller = LlamaController();
   bool _isModelLoaded = false;
   String _modelPath = '';
 
@@ -430,42 +429,27 @@ class LocalLLMService {
 
     _modelPath = path;
 
-    // Carga el modelo en los 8 núcleos del procesador local
-    final bool? success = await _channel.invokeMethod<bool>('loadModel', {'path': _modelPath})
-        .timeout(const Duration(seconds: 60));
-    _isModelLoaded = success == true;
+    // Inicializar el modelo nativo real
+    await _controller.loadModel(
+      modelPath: _modelPath,
+      threads: 8, // Forzar uso total de los 8 cores detectados
+      contextSize: 2048,
+    );
+    _isModelLoaded = true;
   }
 
   /// Inferencia dinámica real por medio de streaming de tokens
-  Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables) async* {
+  Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables) {
     if (!_isModelLoaded) {
-      yield "[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.";
-      return;
+      return Stream.value("[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.");
     }
 
-    final StreamController<String> controller = StreamController<String>();
-
-    // Configuración dinámica basada en los toggles reales de la UI
-    final Map<String, dynamic> options = {
-      'prompt': prompt,
-      'temperature': variables['isModoPro'] == true ? 0.7 : 0.2,
-      'threads': 8, // Forzar uso total de los 8 cores detectados
-      'zram': variables['isZRamEnabled'] == true,
-    };
-
-    // Escuchar el flujo nativo de tokens generados por la red neuronal
-    _channel.invokeMethod('startInference', options);
-
-    // Simulación del puente del canal receptor de eventos nativos
-    const EventChannel('com.vantablack.hub/llm_stream').receiveBroadcastStream().listen((token) {
-      controller.add(token.toString());
-    }, onError: (err) {
-      controller.addError(err);
-    }, onDone: () {
-      controller.close();
-    });
-
-    yield* controller.stream;
+    // Inferencia nativa local usando llama_flutter_android
+    return _controller.generate(
+      prompt: prompt,
+      maxTokens: 512,
+      temperature: variables['isModoPro'] == true ? 0.7 : 0.2,
+    );
   }
 }
 
