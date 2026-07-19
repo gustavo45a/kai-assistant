@@ -7,7 +7,6 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:open_file/open_file.dart';
-import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 
 // --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
