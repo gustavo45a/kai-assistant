@@ -425,7 +425,7 @@ class LocalLLMService {
   }
 
   /// Descarga el modelo real desde el repositorio o verifica su existencia en disco
-  Future<void> initializeRealModel(String path, {int threads = 4}) async {
+  Future<void> initializeRealModel(String path, {int threads = 2}) async {
     final file = File(path);
     if (!await file.exists()) {
       throw Exception("Modelo local no encontrado en el almacenamiento. Requiere descarga inicial.");
@@ -447,16 +447,18 @@ class LocalLLMService {
 
     _modelPath = path;
 
-    // Inicializar el modelo nativo real con configuración segura de memoria
+    // Asignación ultra-segura de memoria y hilos (máximo 4 hilos para prevenir fallas C++)
+    final safeThreads = (threads > 0 && threads <= 4) ? threads : 2;
+
     await _controller.loadModel(
       modelPath: _modelPath,
-      threads: threads > 0 ? threads : 4,
-      contextSize: 1024, // 1024 tokens para evitar desbordamiento de RAM/Heap
+      threads: safeThreads,
+      contextSize: 1024,
     );
     _isModelLoaded = true;
   }
 
-  /// Inferencia dinámica real por medio de streaming de tokens usando plantillas de Chat (ChatML/Instruct)
+  /// Inferencia dinámica ultra-estable por medio de streaming de tokens usando formateador ChatML directo en Dart
   Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables, {List<Map<String, String>>? history}) async* {
     if (!_isModelLoaded) {
       yield "[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.";
@@ -467,40 +469,50 @@ class LocalLLMService {
       await stop();
     }
 
-    final List<ChatMessage> chatMessages = [];
+    final StringBuffer fullPromptBuffer = StringBuffer();
     
-    // System prompt para guiar al modelo Instruct
     final String modeText = variables['currentMode'] == CoreMode.estudiante
         ? 'Modo Estudiante: Explicaciones didácticas, claras y educativas.'
         : 'Modo Normal: Respuestas precisas, útiles y directas.';
 
-    chatMessages.add(ChatMessage(
-      role: 'system',
-      content: 'Eres KAI, un asistente de Inteligencia Artificial ejecutado 100% de forma local en el dispositivo. $modeText Responde siempre en español.',
-    ));
+    // 1. Cabecera System Prompt en formato ChatML estándar
+    fullPromptBuffer.writeln("<|im_start|>system");
+    fullPromptBuffer.writeln("Eres KAI, un asistente de Inteligencia Artificial ejecutado 100% de forma local en el dispositivo. $modeText Responde siempre en español.");
+    fullPromptBuffer.writeln("<|im_end|>");
 
-    // Agregar el historial de la conversación si está disponible
+    // 2. Formatear el historial de conversación
     if (history != null && history.isNotEmpty) {
       for (var msg in history) {
         final sender = msg['sender'];
         final text = msg['text'] ?? '';
         if (text.isEmpty || text == '...' || text.startsWith('[ERROR') || text.startsWith('Error')) continue;
         if (sender == 'user') {
-          chatMessages.add(ChatMessage(role: 'user', content: text));
+          fullPromptBuffer.writeln("<|im_start|>user");
+          fullPromptBuffer.writeln(text);
+          fullPromptBuffer.writeln("<|im_end|>");
         } else if (sender == 'assistant') {
-          chatMessages.add(ChatMessage(role: 'assistant', content: text));
+          fullPromptBuffer.writeln("<|im_start|>assistant");
+          fullPromptBuffer.writeln(text);
+          fullPromptBuffer.writeln("<|im_end|>");
         }
       }
     }
 
-    // Garantizar que el mensaje final enviado sea el prompt actual del usuario
-    if (chatMessages.isEmpty || chatMessages.last.role != 'user' || chatMessages.last.content != prompt) {
-      chatMessages.add(ChatMessage(role: 'user', content: prompt));
+    // 3. Formatear mensaje del usuario si no está en el buffer
+    final String currentPromptChatML = "<|im_start|>user\n$prompt\n<|im_end|>";
+    if (!fullPromptBuffer.toString().contains(currentPromptChatML)) {
+      fullPromptBuffer.writeln("<|im_start|>user");
+      fullPromptBuffer.writeln(prompt);
+      fullPromptBuffer.writeln("<|im_end|>");
     }
 
+    // 4. Apertura del rol asistente para inicio de streaming
+    fullPromptBuffer.writeln("<|im_start|>assistant");
+
     try {
-      final stream = _controller.generateChat(
-        messages: chatMessages,
+      // Inferencia nativa ultra-estable vía generate() directo
+      final stream = _controller.generate(
+        prompt: fullPromptBuffer.toString(),
         maxTokens: 512,
         temperature: variables['isModoPro'] == true ? 0.7 : 0.5,
         repeatPenalty: 1.18,
@@ -787,7 +799,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "2.3.4";
+  final String _versionHub = "2.3.5";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
 
   CoreMode _currentMode = CoreMode.normal;
@@ -852,10 +864,10 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (response.statusCode == 200) {
         final data = response.data;
         if (data is Map<String, dynamic>) {
-          final remoteBuild = data['buildNumber'] ?? 22;
-          final remoteVersion = data['version'] ?? "2.3.4";
+          final remoteBuild = data['buildNumber'] ?? 23;
+          final remoteVersion = data['version'] ?? "2.3.5";
 
-          if (remoteBuild > 22 || remoteVersion != "2.3.4") {
+          if (remoteBuild > 23 || remoteVersion != "2.3.5") {
             if (!mounted) return;
             _mostrarDialogoActualizacion(remoteVersion);
           }
