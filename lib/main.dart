@@ -856,20 +856,22 @@ class _VantablackHomeState extends State<VantablackHome> {
         "https://gustavo45a.github.io/kai-assistant/version.json",
         options: Options(
           responseType: ResponseType.json,
-          receiveTimeout: const Duration(seconds: 4),
-          sendTimeout: const Duration(seconds: 4),
+          receiveTimeout: const Duration(seconds: 5),
+          sendTimeout: const Duration(seconds: 5),
         ),
       );
 
       if (response.statusCode == 200) {
         final data = response.data;
         if (data is Map<String, dynamic>) {
-          final remoteBuild = data['buildNumber'] ?? 23;
-          final remoteVersion = data['version'] ?? "2.3.5";
+          final remoteBuild = data['buildNumber'] as int? ?? 23;
+          final remoteVersion = data['version'] as String? ?? "2.3.5";
+          final remoteUrl = data['url'] as String? ?? _urlApkRemoto;
 
-          if (remoteBuild > 23 || remoteVersion != "2.3.5") {
+          const int currentBuild = 23;
+          if (remoteBuild > currentBuild) {
             if (!mounted) return;
-            _mostrarDialogoActualizacion(remoteVersion);
+            _mostrarDialogoActualizacion(remoteVersion, remoteUrl);
           }
         }
       }
@@ -878,7 +880,7 @@ class _VantablackHomeState extends State<VantablackHome> {
     }
   }
 
-  void _mostrarDialogoActualizacion(String remoteVersion) {
+  void _mostrarDialogoActualizacion(String remoteVersion, String remoteUrl) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -909,7 +911,7 @@ class _VantablackHomeState extends State<VantablackHome> {
               ),
               onPressed: () {
                 Navigator.pop(context);
-                _ejecutarActualizacionOTA();
+                _ejecutarActualizacionOTA(remoteUrl);
               },
               child: const Text("Actualizar"),
             ),
@@ -1143,7 +1145,7 @@ class _VantablackHomeState extends State<VantablackHome> {
     );
   }
 
-  Future<void> _ejecutarActualizacionOTA() async {
+  Future<void> _ejecutarActualizacionOTA([String? targetUrl]) async {
     if (_descargando) return;
 
     if (!Platform.isAndroid) {
@@ -1156,35 +1158,54 @@ class _VantablackHomeState extends State<VantablackHome> {
       return;
     }
 
+    final downloadUrl = targetUrl ?? _urlApkRemoto;
+
     setState(() { _descargando = true; _estadoTexto = "Conectando al Hub..."; });
     try {
       final dio = Dio();
-      final dir = await getExternalStorageDirectory();
-      if (dir == null) throw Exception("Almacenamiento no accesible");
+      final dir = await getApplicationDocumentsDirectory();
       final ruta = "${dir.path}/vantablack_update.apk";
+
+      final file = File(ruta);
+      if (await file.exists()) {
+        await file.delete();
+      }
       
       await dio.download(
-        _urlApkRemoto, 
+        downloadUrl, 
         ruta, 
         onReceiveProgress: (recibido, total) {
           if (total != -1) {
             if (!mounted) return;
             setState(() {
               _progreso = recibido / total;
-              _estadoTexto = "Descarga OTA: ${(recibido / 1024 / 1024).toStringAsFixed(1)} MB";
+              _estadoTexto = "Descarga OTA: ${(recibido / 1024 / 1024).toStringAsFixed(1)} MB / ${(total / 1024 / 1024).toStringAsFixed(1)} MB";
             });
           }
         }
       );
       
       if (!mounted) return;
-      setState(() { _descargando = false; _estadoTexto = "Actualizando..."; });
-      await OpenFile.open(ruta);
+      setState(() { _descargando = false; _estadoTexto = "Instalando versión v$_versionHub..."; });
+      final result = await OpenFile.open(
+        ruta,
+        type: "application/vnd.android.package-archive",
+      );
+
+      if (result.type != ResultType.done) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Permiso o instalador requerido: ${result.message}. Revisa la notificación de descarga para completar la instalación."),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
-      setState(() { _descargando = false; _estadoTexto = "KAI Engine Active"; });
+      setState(() { _descargando = false; _estadoTexto = "Vantablack Core Active"; });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("No se pudo completar la actualización: $e")),
+        SnackBar(content: Text("No se pudo completar la actualización OTA: $e")),
       );
     }
   }
