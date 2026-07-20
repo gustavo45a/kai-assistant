@@ -559,6 +559,194 @@ class ChatThread {
       );
 }
 
+class ZRamMemoryManager {
+  static void optimizeMemory(bool isEnabled) {
+    if (isEnabled) {
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    }
+  }
+}
+
+class LocalWebServerService {
+  static final LocalWebServerService instance = LocalWebServerService._internal();
+  LocalWebServerService._internal();
+
+  HttpServer? _server;
+  String _serverIp = 'Buscando IP...';
+  bool _isRunning = false;
+
+  bool get isRunning => _isRunning;
+  String get serverUrl => "http://$_serverIp:8080";
+
+  Future<String> startServer(Function(String prompt, String response) onLogMessage) async {
+    if (_isRunning) return serverUrl;
+
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLinkLocal: false,
+      );
+
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (!addr.isLoopback) {
+            _serverIp = addr.address;
+            break;
+          }
+        }
+      }
+      if (_serverIp == 'Buscando IP...') _serverIp = '127.0.0.1';
+
+      _server = await HttpServer.bind(InternetAddress.anyIPv4, 8080);
+      _isRunning = true;
+
+      _server!.listen((HttpRequest request) async {
+        final path = request.uri.path;
+        final method = request.method;
+
+        request.response.headers.add('Access-Control-Allow-Origin', '*');
+        request.response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        request.response.headers.add('Access-Control-Allow-Headers', 'Content-Type');
+
+        if (method == 'OPTIONS') {
+          request.response.statusCode = HttpStatus.ok;
+          await request.response.close();
+          return;
+        }
+
+        if (path == '/' || path == '/index.html') {
+          request.response.headers.contentType = ContentType.html;
+          request.response.write(_htmlWebInterface);
+          await request.response.close();
+        } else if (path == '/api/chat' && method == 'POST') {
+          try {
+            final content = await utf8.decoder.bind(request).join();
+            final json = jsonDecode(content) as Map<String, dynamic>;
+            final prompt = json['prompt'] ?? '';
+
+            request.response.headers.contentType = ContentType.json;
+
+            if (prompt.toString().trim().isEmpty) {
+              request.response.write(jsonEncode({'error': 'Prompt vacío'}));
+            } else {
+              final stream = LocalLLMService.instance.generateResponseStream(
+                prompt.toString(),
+                {'isModoPro': false, 'currentMode': CoreMode.normal},
+              );
+
+              String fullResponse = '';
+              await for (var chunk in stream) {
+                fullResponse += chunk;
+              }
+              onLogMessage(prompt.toString(), fullResponse);
+              request.response.write(jsonEncode({'response': fullResponse}));
+            }
+          } catch (e) {
+            request.response.write(jsonEncode({'error': e.toString()}));
+          }
+          await request.response.close();
+        } else if (path == '/api/status') {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({
+            'status': 'online',
+            'app': 'Vantablack Hub KAI IA',
+            'ip': _serverIp,
+            'port': 8080,
+          }));
+          await request.response.close();
+        } else {
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+        }
+      });
+
+      return serverUrl;
+    } catch (e) {
+      _isRunning = false;
+      return "Error al iniciar servidor: $e";
+    }
+  }
+
+  Future<void> stopServer() async {
+    if (_server != null) {
+      await _server!.close(force: true);
+      _server = null;
+    }
+    _isRunning = false;
+  }
+
+  static const String _htmlWebInterface = '''
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KAI IA - Servidor Web Local</title>
+<style>
+  body { background-color: #0b0e14; color: #e0e6ed; font-family: system-ui, sans-serif; margin: 0; padding: 20px; }
+  .container { max-width: 700px; margin: 0 auto; background: #131722; border: 1px solid #1f293d; border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+  h1 { color: #00b4d8; font-size: 22px; margin-top: 0; display: flex; align-items: center; gap: 10px; }
+  .status { background: rgba(0,180,216,0.1); border: 1px solid #00b4d8; color: #00b4d8; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: bold; margin-bottom: 20px; display: inline-block; }
+  #chat-box { height: 350px; overflow-y: auto; background: #0b0e14; border-radius: 12px; padding: 16px; border: 1px solid #1f293d; margin-bottom: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { padding: 10px 14px; border-radius: 12px; max-width: 80%; line-height: 1.4; font-size: 14px; }
+  .user { background: #0077b6; color: white; align-self: flex-end; }
+  .assistant { background: #1f293d; color: #e0e6ed; align-self: flex-start; border: 1px solid #2d3b55; }
+  .input-group { display: flex; gap: 10px; }
+  input { flex: 1; background: #0b0e14; border: 1px solid #1f293d; color: white; padding: 12px; border-radius: 10px; outline: none; font-size: 14px; }
+  input:focus { border-color: #00b4d8; }
+  button { background: #0077b6; color: white; border: none; padding: 12px 20px; border-radius: 10px; cursor: pointer; font-weight: bold; }
+  button:hover { background: #00b4d8; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>⚡ KAI IA - Servidor Web Local</h1>
+  <div class="status">🟢 Conectado a la CPU del teléfono en vivo</div>
+  <div id="chat-box">
+    <div class="msg assistant">¡Hola desde tu servidor web local! La IA se ejecuta directamente en la CPU de tu dispositivo. ¿Qué deseas consultar?</div>
+  </div>
+  <div class="input-group">
+    <input type="text" id="prompt-input" placeholder="Escribe tu mensaje..." onkeydown="if(event.key==='Enter') sendPrompt()">
+    <button onclick="sendPrompt()">Enviar</button>
+  </div>
+</div>
+<script>
+async function sendPrompt() {
+  const input = document.getElementById('prompt-input');
+  const text = input.value.trim();
+  if(!text) return;
+  
+  const box = document.getElementById('chat-box');
+  box.innerHTML += `<div class="msg user">\${text}</div>`;
+  input.value = '';
+  box.scrollTop = box.scrollHeight;
+  
+  const loading = document.createElement('div');
+  loading.className = 'msg assistant';
+  loading.innerText = 'Procesando en la CPU local...';
+  box.appendChild(loading);
+  box.scrollTop = box.scrollHeight;
+  
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prompt: text})
+    });
+    const data = await res.json();
+    loading.innerText = data.response || data.error || 'Sin respuesta';
+  } catch(e) {
+    loading.innerText = 'Error de conexión: ' + e;
+  }
+  box.scrollTop = box.scrollHeight;
+}
+</script>
+</body>
+</html>
+''';
+}
+
 class VantablackHome extends StatefulWidget {
   const VantablackHome({super.key});
   @override
@@ -585,6 +773,7 @@ class _VantablackHomeState extends State<VantablackHome> {
   bool _rigorousSearchOnly = true;
   bool _ttsEnabled = false;
   bool isWebServidorActive = false;
+  String _webServerUrl = "http://127.0.0.1:8080";
   bool isModoPro = false;
   double _inferenceSpeed = 1.0;
   String _selectedCloudProvider = "Google Drive";
@@ -1253,7 +1442,19 @@ class _VantablackHomeState extends State<VantablackHome> {
           subtitle: const Text("Optimiza el consumo comprimiendo memoria", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: isZRamEnabled,
           activeColor: activeColor,
-          onChanged: (val) => setState(() => isZRamEnabled = val),
+          onChanged: (val) {
+            setState(() => isZRamEnabled = val);
+            ZRamMemoryManager.optimizeMemory(val);
+            if (val) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("⚡ Compresión Z-RAM activada: Memoria e imágenes liberadas."),
+                  backgroundColor: Colors.green,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+          },
         ),
         
         if (isZRamEnabled) ...[
@@ -1433,20 +1634,62 @@ class _VantablackHomeState extends State<VantablackHome> {
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text("Asistente Virtual", style: TextStyle(fontSize: 12, color: Colors.white70)),
-          subtitle: const Text("Interactúa con dispositivos cercanos vía API", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          subtitle: const Text("Interactúa en segundo plano con tu dispositivo", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: isVirtualAssistantActive,
           activeColor: activeColor,
-          onChanged: (val) => setState(() => isVirtualAssistantActive = val),
+          onChanged: (val) {
+            setState(() => isVirtualAssistantActive = val);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(val ? "🎙️ Modo Asistente Virtual Activado." : "🎙️ Modo Asistente Virtual Desactivado."),
+                backgroundColor: val ? const Color(0xFF0077B6) : Colors.grey,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
         ),
         
         // Web Mode Background Server
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text("Modo Web Servidor", style: TextStyle(fontSize: 12, color: Colors.white70)),
-          subtitle: const Text("Dejar la PC encendida y servir interfaz en la web", style: TextStyle(fontSize: 10, color: Colors.white38)),
+          subtitle: const Text("Inicia un servidor HTTP local para conectar desde otros dispositivos", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: isWebServidorActive,
           activeColor: activeColor,
-          onChanged: (val) => setState(() => isWebServidorActive = val),
+          onChanged: (val) async {
+            setState(() => isWebServidorActive = val);
+            if (val) {
+              final url = await LocalWebServerService.instance.startServer((prompt, response) {
+                if (mounted) {
+                  setState(() {
+                    _activeThread.messages.add({"sender": "user", "text": "[WEB CLIENT]: $prompt"});
+                    _activeThread.messages.add({"sender": "assistant", "text": response});
+                  });
+                }
+              });
+              setState(() => _webServerUrl = url);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("🌐 Servidor Web en vivo en: $_webServerUrl"),
+                    backgroundColor: Colors.green,
+                    duration: const Duration(seconds: 4),
+                  ),
+                );
+              }
+            } else {
+              await LocalWebServerService.instance.stopServer();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("🌐 Servidor Web detenido."),
+                    backgroundColor: Colors.grey,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            }
+          },
         ),
         
         if (isWebServidorActive) ...[
@@ -1458,11 +1701,17 @@ class _VantablackHomeState extends State<VantablackHome> {
               borderRadius: BorderRadius.circular(6),
               border: Border.all(color: Colors.green.withOpacity(0.3)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.wifi_tethering_rounded, size: 12, color: Colors.green),
-                SizedBox(width: 6),
-                Text("Servidor Web Activo: http://192.168.1.100:8080", style: TextStyle(fontSize: 9, color: Colors.green, fontFamily: 'monospace')),
+                const Icon(Icons.wifi_tethering_rounded, size: 12, color: Colors.green),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    "Servidor Web Activo: $_webServerUrl",
+                    style: const TextStyle(fontSize: 9, color: Colors.green, fontFamily: 'monospace'),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
