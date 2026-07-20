@@ -940,7 +940,19 @@ class _VantablackHomeState extends State<VantablackHome> {
     final dir = await getApplicationDocumentsDirectory();
     for (var model in localModels) {
       final file = File("${dir.path}/${model.id}.gguf");
-      model.isDownloaded = await file.exists();
+      if (await file.exists()) {
+        final length = await file.length();
+        // Un archivo GGUF válido debe pesar al menos 50 MB
+        if (length > 50 * 1024 * 1024) {
+          model.isDownloaded = true;
+        } else {
+          // Borrar archivos corruptos o descargas incompletas de 0 bytes
+          try { await file.delete(); } catch (_) {}
+          model.isDownloaded = false;
+        }
+      } else {
+        model.isDownloaded = false;
+      }
     }
   }
 
@@ -1028,13 +1040,28 @@ class _VantablackHomeState extends State<VantablackHome> {
     final rutaModelo = "${directory.path}/${modelInfo.id}.gguf";
     final modelFile = File(rutaModelo);
 
-    if (!await modelFile.exists()) {
+    // Verificar existencia Y tamaño del archivo binario
+    bool isFileValid = await modelFile.exists();
+    if (isFileValid) {
+      final size = await modelFile.length();
+      if (size < 50 * 1024 * 1024) { // Si pesa menos de 50MB está incompleto/corrupto
+        isFileValid = false;
+        try { await modelFile.delete(); } catch (_) {}
+      }
+    }
+
+    if (!isFileValid) {
       if (!mounted) return;
+      setState(() {
+        threadActual.modeloInicializado = false;
+        modelInfo.isDownloaded = false;
+      });
+      _guardarDatosEnDisco();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("⚠️ El modelo ${modelInfo.name} no está descargado en tu teléfono. Toca 'Descargar Modelo' en las opciones."),
+          content: Text("⚠️ El modelo ${modelInfo.name} no está descargado o se interrumpió la descarga. Toca 'Descargar Modelo' para obtenerlo."),
           backgroundColor: Colors.amber[900],
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 5),
         ),
       );
       return;
@@ -1245,20 +1272,36 @@ class _VantablackHomeState extends State<VantablackHome> {
       final dio = Dio();
       final dir = await getApplicationDocumentsDirectory();
       final rutaDestino = "${dir.path}/${model.id}.gguf";
+      final rutaTemp = "${dir.path}/${model.id}.tmp";
+
+      final tempFile = File(rutaTemp);
+      if (await tempFile.exists()) {
+        try { await tempFile.delete(); } catch (_) {}
+      }
 
       await dio.download(
         model.urlGguf,
-        rutaDestino,
+        rutaTemp,
         onReceiveProgress: (recibido, total) {
           if (total != -1) {
             if (!mounted) return;
             setState(() {
               _progreso = recibido / total;
-              _estadoTexto = "Descangando: ${(recibido / 1024 / 1024).toStringAsFixed(0)}MB / ${(total / 1024 / 1024).toStringAsFixed(0)}MB";
+              _estadoTexto = "Descargando: ${(recibido / 1024 / 1024).toStringAsFixed(0)}MB / ${(total / 1024 / 1024).toStringAsFixed(0)}MB";
             });
           }
         },
       );
+
+      final downloadedTemp = File(rutaTemp);
+      if (await downloadedTemp.exists() && (await downloadedTemp.length()) > 50 * 1024 * 1024) {
+        if (await File(rutaDestino).exists()) {
+          try { await File(rutaDestino).delete(); } catch (_) {}
+        }
+        await downloadedTemp.rename(rutaDestino);
+      } else {
+        throw Exception("La descarga del modelo se interrumpió o el archivo no es válido.");
+      }
 
       if (!mounted) return;
       setState(() {
@@ -1274,6 +1317,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (!mounted) return;
       setState(() {
         _descargando = false;
+        thread.modeloInicializado = false;
         _estadoTexto = "Fallo al descargar modelo";
       });
       ScaffoldMessenger.of(context).showSnackBar(
