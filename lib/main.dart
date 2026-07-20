@@ -754,7 +754,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "2.3.2";
+  final String _versionHub = "2.3.4";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/app-release.apk";
 
   CoreMode _currentMode = CoreMode.normal;
