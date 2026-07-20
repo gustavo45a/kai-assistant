@@ -1,0 +1,34 @@
+### 1. ⚙️ Definir Variables de Entorno (Java 21 + Android SDK)                                                                                                                     
+                                                                                                                                                                                     
+    export PATH=$PATH:/home/evelynasgo/snap/flutter/common/flutter/bin                                                                                                               
+    export JAVA_HOME="/usr/lib/jvm/java-21-openjdk-amd64"                                                                                                                            
+    export ANDROID_HOME=$HOME/Android/Sdk                                                                                                                                            
+    export PATH=$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH                                                                             
+    export GRADLE_OPTS="-Dorg.gradle.daemon=true -Dorg.gradle.jvmargs=-Xmx3072m -Dorg.gradle.parallel=true"                                                                          
+                                                                                                                                                                                     
+  ### 2. 🧹 Limpiar y Obtener Dependencias                                                                                                                                           
+                                                                                                                                                                                     
+    flutter clean                                                                                                                                                                    
+    flutter pub get                                                                                                                                                                  
+                                                                                                                                                                                     
+  ### 3. 🎨 Generar Iconos Nativos HD (a partir de assets/logo.png)                                                                                                                  
+                                                                                                                                                                                     
+    dart run flutter_launcher_icons                                                                                                                                                  
+                                                                                                                                                                                     
+  ### 4. 🔍 Verificar que no existan errores en el código                                                                                                                            
+                                                                                                                                                                                     
+    flutter analyze                                                                                                                                                                  
+                                                                                                                                                                                     
+  ### 5. 🚀 Compilar el APK para producción                                                                                                                                          
+                                                                                                                                                                                     
+    flutter build apk --release                                                                                                                                                      
+                                                                                                                                                                                     
+  ### 6. 📤 Copiar el APK y subir todo a tu repositorio de GitHub                                                                                                                    
+                                                                                                                                                                                     
+    # Copiar el archivo APK generado                                                                                                                                                 
+    cp build/app/outputs/flutter-apk/app-release.apk ./app-release.apk
+  
+    # Subir cambios a tu repositorio
+    git add .
+    git commit -m "Feat: Nombre Vantablack, nuevo icono y actualización v2.3.5"
+    git push origin main
