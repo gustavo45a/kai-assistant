@@ -170,6 +170,7 @@ class VantablackApp extends StatelessWidget {
   const VantablackApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
+        title: 'Vantablack',
         debugShowCheckedModeBanner: false,
         theme: ThemeData.dark().copyWith(
           scaffoldBackgroundColor: const Color(0xFF020408), // Negro Absoluto Vantablack
