@@ -819,10 +819,10 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (response.statusCode == 200) {
         final data = response.data;
         if (data is Map<String, dynamic>) {
-          final remoteBuild = data['buildNumber'] ?? 18;
-          final remoteVersion = data['version'] ?? "2.3.1";
+          final remoteBuild = data['buildNumber'] ?? 22;
+          final remoteVersion = data['version'] ?? "2.3.4";
 
-          if (remoteBuild > 18 || remoteVersion != "2.3.1") {
+          if (remoteBuild > 22 || remoteVersion != "2.3.4") {
             if (!mounted) return;
             _mostrarDialogoActualizacion(remoteVersion);
           }
