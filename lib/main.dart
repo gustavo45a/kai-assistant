@@ -439,6 +439,9 @@ class LocalLLMService {
       } catch (_) {}
     }
 
+    // Liberar memoria gráfica y garbage collector antes de cargar modelo nativo en C++
+    ZRamMemoryManager.optimizeMemory(true);
+
     try {
       final loaded = await _controller.isModelLoaded();
       if (loaded) {
@@ -448,15 +451,20 @@ class LocalLLMService {
 
     _modelPath = path;
 
-    // Asignación ultra-segura de memoria y hilos (máximo 4 hilos para prevenir fallas C++)
-    final safeThreads = (threads > 0 && threads <= 4) ? threads : 2;
+    // Asignación ultra-segura de hilos (máximo 2 hilos para prevenir fallas C++ y sobrecalentamiento)
+    final safeThreads = (threads > 0 && threads <= 2) ? threads : 2;
 
-    await _controller.loadModel(
-      modelPath: _modelPath,
-      threads: safeThreads,
-      contextSize: 1024,
-    );
-    _isModelLoaded = true;
+    try {
+      await _controller.loadModel(
+        modelPath: _modelPath,
+        threads: safeThreads,
+        contextSize: 768, // Límite de contexto seguro para la RAM de dispositivos móviles
+      );
+      _isModelLoaded = true;
+    } catch (e) {
+      _isModelLoaded = false;
+      throw Exception("RAM insuficiente o error al alojar el modelo local: $e");
+    }
   }
 
   /// Inferencia dinámica ultra-estable por medio de streaming de tokens usando formateador ChatML directo en Dart
@@ -476,17 +484,23 @@ class LocalLLMService {
         ? 'Modo Estudiante: Explicaciones didácticas, claras y educativas.'
         : 'Modo Normal: Respuestas precisas, útiles y directas.';
 
-    // 1. Cabecera System Prompt en formato ChatML estándar
+    // 1. Cabecera System Prompt en formato ChatML conciso
     fullPromptBuffer.writeln("<|im_start|>system");
-    fullPromptBuffer.writeln("Eres KAI, un asistente de Inteligencia Artificial ejecutado 100% de forma local en el dispositivo. $modeText Responde siempre en español.");
+    fullPromptBuffer.writeln("Eres KAI, un asistente de Inteligencia Artificial 100% local. $modeText Responde en español.");
     fullPromptBuffer.writeln("<|im_end|>");
 
-    // 2. Formatear el historial de conversación
+    // 2. Filtrar y truncar el historial (máximo últimos 4 mensajes) para prevenir buffer overflow de n_ctx
     if (history != null && history.isNotEmpty) {
-      for (var msg in history) {
+      final validMsgs = history.where((msg) {
+        final text = msg['text'] ?? '';
+        return text.isNotEmpty && text != '...' && !text.startsWith('[ERROR') && !text.startsWith('Error') && !text.startsWith('VANTABLACK');
+      }).toList();
+
+      final recentMsgs = validMsgs.length > 4 ? validMsgs.sublist(validMsgs.length - 4) : validMsgs;
+
+      for (var msg in recentMsgs) {
         final sender = msg['sender'];
         final text = msg['text'] ?? '';
-        if (text.isEmpty || text == '...' || text.startsWith('[ERROR') || text.startsWith('Error')) continue;
         if (sender == 'user') {
           fullPromptBuffer.writeln("<|im_start|>user");
           fullPromptBuffer.writeln(text);
@@ -499,9 +513,9 @@ class LocalLLMService {
       }
     }
 
-    // 3. Formatear mensaje del usuario si no está en el buffer
-    final String currentPromptChatML = "<|im_start|>user\n$prompt\n<|im_end|>";
-    if (!fullPromptBuffer.toString().contains(currentPromptChatML)) {
+    // 3. Formatear mensaje actual del usuario si no está en el buffer
+    final String promptMarker = "<|im_start|>user\n$prompt";
+    if (!fullPromptBuffer.toString().contains(promptMarker)) {
       fullPromptBuffer.writeln("<|im_start|>user");
       fullPromptBuffer.writeln(prompt);
       fullPromptBuffer.writeln("<|im_end|>");
@@ -511,10 +525,10 @@ class LocalLLMService {
     fullPromptBuffer.writeln("<|im_start|>assistant");
 
     try {
-      // Inferencia nativa ultra-estable vía generate() directo
+      // Inferencia nativa ultra-estable con maxTokens recortado a 256 para prevenir picos de memoria
       final stream = _controller.generate(
         prompt: fullPromptBuffer.toString(),
-        maxTokens: 512,
+        maxTokens: 256,
         temperature: variables['isModoPro'] == true ? 0.7 : 0.5,
         repeatPenalty: 1.18,
       );
@@ -1039,10 +1053,14 @@ class _VantablackHomeState extends State<VantablackHome> {
     final int indiceRespuesta = threadActual.messages.length - 1;
 
     try {
-      // Inicializar el modelo nativo real usando el número de núcleos de la CPU detectados
-      await LocalLLMService.instance.initializeRealModel(rutaModelo, threads: _cpuCores);
+      // Inicializar el modelo nativo real usando 2 hilos súper estables (previene cierres nativos por CPU/RAM)
+      await LocalLLMService.instance.initializeRealModel(rutaModelo, threads: 2);
 
       String respuestaCompleta = "";
+      final historialPrevio = threadActual.messages.length >= 2 
+          ? threadActual.messages.sublist(0, threadActual.messages.length - 2) 
+          : <Map<String, String>>[];
+
       final stream = LocalLLMService.instance.generateResponseStream(
         textoUsuario,
         {
@@ -1053,7 +1071,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           'inferenceSpeed': _inferenceSpeed,
           'currentMode': _currentMode,
         },
-        history: threadActual.messages,
+        history: historialPrevio,
       );
 
       await for (var chunk in stream) {
