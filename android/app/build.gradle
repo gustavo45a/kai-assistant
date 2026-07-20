@@ -25,9 +25,8 @@ android {
         minSdkVersion 26
         targetSdkVersion 34
         
-        // Solución al error: Quemamos las versiones manualmente para Codespaces
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 23
+        versionName "2.3.5"
 
         multiDexEnabled true
     }
