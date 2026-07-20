@@ -22,7 +22,7 @@ android {
     defaultConfig {
         applicationId "com.tuproyecto.kai.kai_app"
         // minSdk necesario para las APIs de almacenamiento seguro y OpenFile
-        minSdkVersion 23
+        minSdkVersion flutter.minSdkVersion
         targetSdkVersion 34
         
         // Solución al error: Quemamos las versiones manualmente para Codespaces
