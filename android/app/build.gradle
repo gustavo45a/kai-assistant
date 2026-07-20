@@ -11,18 +11,18 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
         applicationId "com.tuproyecto.kai.kai_app"
-        // minSdk necesario para las APIs de almacenamiento seguro y OpenFile
-        minSdkVersion flutter.minSdkVersion
+        // minSdk 26 necesario por la librería llama_flutter_android
+        minSdkVersion 26
         targetSdkVersion 34
         
         // Solución al error: Quemamos las versiones manualmente para Codespaces

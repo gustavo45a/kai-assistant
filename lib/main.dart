@@ -438,17 +438,46 @@ class LocalLLMService {
     _isModelLoaded = true;
   }
 
-  /// Inferencia dinámica real por medio de streaming de tokens
-  Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables) {
+  /// Inferencia dinámica real por medio de streaming de tokens usando plantillas de Chat (ChatML/Instruct)
+  Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables, {List<Map<String, String>>? history}) {
     if (!_isModelLoaded) {
       return Stream.value("[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.");
     }
 
-    // Inferencia nativa local usando llama_flutter_android
-    return _controller.generate(
-      prompt: prompt,
+    final List<ChatMessage> chatMessages = [];
+    
+    // System prompt para guiar al modelo Instruct
+    final String modeText = variables['currentMode'] == CoreMode.estudiante
+        ? 'Modo Estudiante: Explicaciones didácticas, claras y educativas.'
+        : 'Modo Normal: Respuestas precisas, útiles y directas.';
+
+    chatMessages.add(ChatMessage(
+      role: 'system',
+      content: 'Eres KAI, un asistente de Inteligencia Artificial ejecutado 100% de forma local en el dispositivo. $modeText Responde siempre en español.',
+    ));
+
+    // Agregar el historial de la conversación si está disponible
+    if (history != null && history.isNotEmpty) {
+      for (var msg in history) {
+        final sender = msg['sender'];
+        final text = msg['text'] ?? '';
+        if (text.isEmpty || text == '...' || text.startsWith('[ERROR')) continue;
+        if (sender == 'user') {
+          chatMessages.add(ChatMessage(role: 'user', content: text));
+        } else if (sender == 'assistant') {
+          chatMessages.add(ChatMessage(role: 'assistant', content: text));
+        }
+      }
+    } else {
+      chatMessages.add(ChatMessage(role: 'user', content: prompt));
+    }
+
+    // Inferencia nativa local usando plantilla de chat estructurada
+    return _controller.generateChat(
+      messages: chatMessages,
       maxTokens: 512,
-      temperature: variables['isModoPro'] == true ? 0.7 : 0.2,
+      temperature: variables['isModoPro'] == true ? 0.7 : 0.5,
+      repeatPenalty: 1.18,
     );
   }
 }
@@ -773,6 +802,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           'inferenceSpeed': _inferenceSpeed,
           'currentMode': _currentMode,
         },
+        history: threadActual.messages,
       );
 
       await for (var chunk in stream) {
