@@ -416,32 +416,55 @@ class LocalLLMService {
   bool _isModelLoaded = false;
   String _modelPath = '';
 
-  /// Descarga el modelo real desde el repositorio o verifica su existencia en disco
-  Future<void> initializeRealModel(String path) async {
-    if (_isModelLoaded && _modelPath == path) {
-      return; // Ya está cargado en memoria
-    }
+  Future<void> stop() async {
+    try {
+      if (_controller.isGenerating) {
+        await _controller.stop();
+      }
+    } catch (_) {}
+  }
 
+  /// Descarga el modelo real desde el repositorio o verifica su existencia en disco
+  Future<void> initializeRealModel(String path, {int threads = 4}) async {
     final file = File(path);
     if (!await file.exists()) {
       throw Exception("Modelo local no encontrado en el almacenamiento. Requiere descarga inicial.");
     }
 
+    if (_isModelLoaded && _modelPath == path) {
+      try {
+        final loaded = await _controller.isModelLoaded();
+        if (loaded) return; // Ya está cargado y listo
+      } catch (_) {}
+    }
+
+    try {
+      final loaded = await _controller.isModelLoaded();
+      if (loaded) {
+        await _controller.dispose();
+      }
+    } catch (_) {}
+
     _modelPath = path;
 
-    // Inicializar el modelo nativo real
+    // Inicializar el modelo nativo real con configuración segura de memoria
     await _controller.loadModel(
       modelPath: _modelPath,
-      threads: 8, // Forzar uso total de los 8 cores detectados
-      contextSize: 2048,
+      threads: threads > 0 ? threads : 4,
+      contextSize: 1024, // 1024 tokens para evitar desbordamiento de RAM/Heap
     );
     _isModelLoaded = true;
   }
 
   /// Inferencia dinámica real por medio de streaming de tokens usando plantillas de Chat (ChatML/Instruct)
-  Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables, {List<Map<String, String>>? history}) {
+  Stream<String> generateResponseStream(String prompt, Map<String, dynamic> variables, {List<Map<String, String>>? history}) async* {
     if (!_isModelLoaded) {
-      return Stream.value("[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.");
+      yield "[ERROR HARDWARE]: El motor local no está inicializado. Descarga los pesos del modelo Hugging Face primero.";
+      return;
+    }
+
+    if (_controller.isGenerating) {
+      await stop();
     }
 
     final List<ChatMessage> chatMessages = [];
@@ -461,24 +484,34 @@ class LocalLLMService {
       for (var msg in history) {
         final sender = msg['sender'];
         final text = msg['text'] ?? '';
-        if (text.isEmpty || text == '...' || text.startsWith('[ERROR')) continue;
+        if (text.isEmpty || text == '...' || text.startsWith('[ERROR') || text.startsWith('Error')) continue;
         if (sender == 'user') {
           chatMessages.add(ChatMessage(role: 'user', content: text));
         } else if (sender == 'assistant') {
           chatMessages.add(ChatMessage(role: 'assistant', content: text));
         }
       }
-    } else {
+    }
+
+    // Garantizar que el mensaje final enviado sea el prompt actual del usuario
+    if (chatMessages.isEmpty || chatMessages.last.role != 'user' || chatMessages.last.content != prompt) {
       chatMessages.add(ChatMessage(role: 'user', content: prompt));
     }
 
-    // Inferencia nativa local usando plantilla de chat estructurada
-    return _controller.generateChat(
-      messages: chatMessages,
-      maxTokens: 512,
-      temperature: variables['isModoPro'] == true ? 0.7 : 0.5,
-      repeatPenalty: 1.18,
-    );
+    try {
+      final stream = _controller.generateChat(
+        messages: chatMessages,
+        maxTokens: 512,
+        temperature: variables['isModoPro'] == true ? 0.7 : 0.5,
+        repeatPenalty: 1.18,
+      );
+
+      await for (var token in stream) {
+        yield token;
+      }
+    } catch (e) {
+      yield " [Error de Inferencia: $e]";
+    }
   }
 }
 
@@ -956,6 +989,28 @@ class _VantablackHomeState extends State<VantablackHome> {
 
     final threadActual = _activeThread;
     final textoUsuario = _chatController.text.trim();
+
+    // Resolver la ruta real del modelo seleccionado dinámicamente
+    final directory = await getApplicationDocumentsDirectory();
+    final modelInfo = localModels.firstWhere(
+      (m) => m.name == threadActual.iaModel,
+      orElse: () => localModels.first,
+    );
+    final rutaModelo = "${directory.path}/${modelInfo.id}.gguf";
+    final modelFile = File(rutaModelo);
+
+    if (!await modelFile.exists()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("⚠️ El modelo ${modelInfo.name} no está descargado en tu teléfono. Toca 'Descargar Modelo' en las opciones."),
+          backgroundColor: Colors.amber[900],
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     _chatController.clear();
 
     setState(() {
@@ -969,16 +1024,8 @@ class _VantablackHomeState extends State<VantablackHome> {
     final int indiceRespuesta = threadActual.messages.length - 1;
 
     try {
-      // Resolver la ruta real del modelo seleccionado dinámicamente
-      final directory = await getApplicationDocumentsDirectory();
-      final modelInfo = localModels.firstWhere(
-        (m) => m.name == threadActual.iaModel,
-        orElse: () => localModels.first,
-      );
-      final rutaModelo = "${directory.path}/${modelInfo.id}.gguf";
-
-      // Inicializar el modelo nativo real
-      await LocalLLMService.instance.initializeRealModel(rutaModelo);
+      // Inicializar el modelo nativo real usando el número de núcleos de la CPU detectados
+      await LocalLLMService.instance.initializeRealModel(rutaModelo, threads: _cpuCores);
 
       String respuestaCompleta = "";
       final stream = LocalLLMService.instance.generateResponseStream(
