@@ -234,10 +234,10 @@ class _LoginScreenState extends State<LoginScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF090D14),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF00B4D8).withOpacity(0.15)),
+              border: Border.all(color: const Color(0xFF00B4D8).withValues(alpha: 0.15)),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF00B4D8).withOpacity(0.05),
+                  color: const Color(0xFF00B4D8).withValues(alpha: 0.05),
                   blurRadius: 30,
                   spreadRadius: 5,
                 )
@@ -1094,15 +1094,15 @@ class _VantablackHomeState extends State<VantablackHome> {
         width: 115,
         height: 75,
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF0F141C).withOpacity(0.85) : const Color(0xFF06090E).withOpacity(0.3),
+          color: isSelected ? const Color(0xFF0F141C).withValues(alpha: 0.85) : const Color(0xFF06090E).withValues(alpha: 0.3),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isSelected ? activeColor.withOpacity(0.6) : Colors.white.withOpacity(0.06),
+            color: isSelected ? activeColor.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.06),
             width: isSelected ? 1.4 : 0.7,
           ),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 6, offset: const Offset(0, 3)),
-            if (isSelected) BoxShadow(color: activeColor.withOpacity(0.15), blurRadius: 12, spreadRadius: -1),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 6, offset: const Offset(0, 3)),
+            if (isSelected) BoxShadow(color: activeColor.withValues(alpha: 0.15), blurRadius: 12, spreadRadius: -1),
           ],
         ),
         child: ClipRRect(
@@ -1117,7 +1117,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Colors.white.withOpacity(isSelected ? 0.15 : 0.04), Colors.white.withOpacity(0.0)],
+                      colors: [Colors.white.withValues(alpha: isSelected ? 0.15 : 0.04), Colors.white.withValues(alpha: 0.0)],
                     ),
                   ),
                 ),
@@ -1340,7 +1340,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       decoration: BoxDecoration(
         color: const Color(0xFF090D14),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1450,7 +1450,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))),
+              border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
             ),
             child: Row(
               children: [
@@ -1498,7 +1498,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           title: const Text("Comprensión Visual", style: TextStyle(fontSize: 12, color: Colors.white70)),
           subtitle: const Text("Habilita análisis profundo de imágenes", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: _visualAnalysis,
-          activeColor: activeColor,
+          activeTrackColor: activeColor,
           onChanged: (val) => setState(() => _visualAnalysis = val),
         ),
         
@@ -1508,7 +1508,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           title: const Text("Investigación Rigurosa", style: TextStyle(fontSize: 12, color: Colors.white70)),
           subtitle: const Text("Filtra y omite blogs o fuentes de baja confianza", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: _rigorousSearchOnly,
-          activeColor: activeColor,
+          activeTrackColor: activeColor,
           onChanged: (val) => setState(() => _rigorousSearchOnly = val),
         ),
         
@@ -1522,7 +1522,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           title: const Text("Compresión Z-RAM", style: TextStyle(fontSize: 12, color: Colors.white70)),
           subtitle: const Text("Optimiza el consumo comprimiendo memoria", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: isZRamEnabled,
-          activeColor: activeColor,
+          activeTrackColor: activeColor,
           onChanged: (val) {
             setState(() => isZRamEnabled = val);
             ZRamMemoryManager.optimizeMemory(val);
@@ -1616,7 +1616,7 @@ class _VantablackHomeState extends State<VantablackHome> {
             Expanded(
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _ttsEnabled ? activeColor.withOpacity(0.15) : const Color(0xFF0E1420),
+                  backgroundColor: _ttsEnabled ? activeColor.withValues(alpha: 0.15) : const Color(0xFF0E1420),
                   foregroundColor: _ttsEnabled ? activeColor : Colors.white60,
                   side: BorderSide(color: _ttsEnabled ? activeColor : Colors.transparent),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1656,7 +1656,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           title: const Text("Multimedia Cuantizada", style: TextStyle(fontSize: 12, color: Colors.white70)),
           subtitle: const Text("Manejo eficiente de imágenes y video", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: _quantizedMedia,
-          activeColor: activeColor,
+          activeTrackColor: activeColor,
           onChanged: (val) => setState(() => _quantizedMedia = val),
         ),
         
@@ -1687,7 +1687,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           title: const Text("Modo Pro", style: TextStyle(fontSize: 12, color: Colors.white70)),
           subtitle: const Text("Acceso a configuraciones experimentales", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: isModoPro,
-          activeColor: activeColor,
+          activeTrackColor: activeColor,
           onChanged: (val) => setState(() => isModoPro = val),
         ),
         
@@ -1717,7 +1717,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           title: const Text("Asistente Virtual", style: TextStyle(fontSize: 12, color: Colors.white70)),
           subtitle: const Text("Interactúa en segundo plano con tu dispositivo", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: isVirtualAssistantActive,
-          activeColor: activeColor,
+          activeTrackColor: activeColor,
           onChanged: (val) {
             setState(() => isVirtualAssistantActive = val);
             ScaffoldMessenger.of(context).showSnackBar(
@@ -1736,7 +1736,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           title: const Text("Modo Web Servidor", style: TextStyle(fontSize: 12, color: Colors.white70)),
           subtitle: const Text("Inicia un servidor HTTP local para conectar desde otros dispositivos", style: TextStyle(fontSize: 10, color: Colors.white38)),
           value: isWebServidorActive,
-          activeColor: activeColor,
+          activeTrackColor: activeColor,
           onChanged: (val) async {
             setState(() => isWebServidorActive = val);
             if (val) {
@@ -1778,9 +1778,9 @@ class _VantablackHomeState extends State<VantablackHome> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.1),
+              color: Colors.green.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.green.withOpacity(0.3)),
+              border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
@@ -1834,8 +1834,8 @@ class _VantablackHomeState extends State<VantablackHome> {
                         boxShadow: [
                           BoxShadow(
                             color: _currentMode == CoreMode.estudiante
-                                ? const Color(0xFF9D4EDD).withOpacity(0.2)
-                                : const Color(0xFF00B4D8).withOpacity(0.15),
+                                ? const Color(0xFF9D4EDD).withValues(alpha: 0.2)
+                                : const Color(0xFF00B4D8).withValues(alpha: 0.15),
                             blurRadius: 24,
                           )
                         ],
@@ -1979,9 +1979,9 @@ class _VantablackHomeState extends State<VantablackHome> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF00B4D8).withOpacity(0.12),
+                            color: const Color(0xFF00B4D8).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: const Color(0xFF00B4D8).withOpacity(0.25)),
+                            border: Border.all(color: const Color(0xFF00B4D8).withValues(alpha: 0.25)),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -2016,7 +2016,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                         BoxDecoration decoration = BoxDecoration(
                           color: const Color(0xFF080C14),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white.withOpacity(0.015)),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.015)),
                         );
                         TextStyle textStyle = const TextStyle(color: Color(0xE6FFFFFF), fontSize: 14, height: 1.4);
 
@@ -2025,12 +2025,12 @@ class _VantablackHomeState extends State<VantablackHome> {
                           decoration = BoxDecoration(
                             color: const Color(0xFF121A28),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF00B4D8).withOpacity(0.2)),
+                            border: Border.all(color: const Color(0xFF00B4D8).withValues(alpha: 0.2)),
                           );
                         } else if (sender == "system") {
                           align = Alignment.center;
                           decoration = BoxDecoration(
-                            color: const Color(0xFF00B4D8).withOpacity(0.01),
+                            color: const Color(0xFF00B4D8).withValues(alpha: 0.01),
                             borderRadius: BorderRadius.circular(6),
                           );
                           textStyle = const TextStyle(color: Color(0xFF00B4D8), fontSize: 11, fontFamily: 'monospace');
@@ -2191,7 +2191,7 @@ class _ConfigureInstanceDialogState extends State<ConfigureInstanceDialog> {
                   return Container(
                     margin: const EdgeInsets.symmetric(vertical: 4),
                     decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFF00B4D8).withOpacity(0.08) : Colors.transparent,
+                      color: isSelected ? const Color(0xFF00B4D8).withValues(alpha: 0.08) : Colors.transparent,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                         color: isSelected ? const Color(0xFF00B4D8) : Colors.white10,
@@ -2208,7 +2208,7 @@ class _ConfigureInstanceDialogState extends State<ConfigureInstanceDialog> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: isRecommended ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15),
+                              color: isRecommended ? Colors.green.withValues(alpha: 0.15) : Colors.red.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -2219,7 +2219,7 @@ class _ConfigureInstanceDialogState extends State<ConfigureInstanceDialog> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: model.isDownloaded ? Colors.blue.withOpacity(0.15) : Colors.white10,
+                              color: model.isDownloaded ? Colors.blue.withValues(alpha: 0.15) : Colors.white10,
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
