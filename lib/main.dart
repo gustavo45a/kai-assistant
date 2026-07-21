@@ -433,12 +433,12 @@ class LocalLLMService {
     final StringBuffer fullPromptBuffer = StringBuffer();
     
     final String modeText = variables['currentMode'] == CoreMode.estudiante
-        ? 'Modo Estudiante: Explicaciones didácticas, claras y educativas.'
-        : 'Modo Normal: Respuestas precisas, útiles y directas.';
+        ? ' Explicaciones didácticas y educativas.'
+        : '';
 
     // 1. Cabecera System Prompt en formato ChatML conciso
     fullPromptBuffer.writeln("<|im_start|>system");
-    fullPromptBuffer.writeln("Eres KAI, un asistente de Inteligencia Artificial 100% local. $modeText Responde en español.");
+    fullPromptBuffer.writeln("Eres KAI, un asistente de IA útil, conciso y directo.$modeText");
     fullPromptBuffer.writeln("<|im_end|>");
 
     // 2. Filtrar y truncar el historial (máximo últimos 4 mensajes) para prevenir buffer overflow de n_ctx
@@ -477,16 +477,22 @@ class LocalLLMService {
     fullPromptBuffer.writeln("<|im_start|>assistant");
 
     try {
-      // Inferencia nativa ultra-estable con parámetros afinados para evitar respuestas repetitivas
+      // Inferencia nativa ultra-estable con parámetros afinados para evitar repeticiones
       final stream = _controller.generate(
         prompt: fullPromptBuffer.toString(),
         maxTokens: 256,
         temperature: 0.7,
         topP: 0.9,
-        repeatPenalty: 1.15,
+        repeatPenalty: 1.18,
       );
 
       await for (var token in stream) {
+        if (token.contains("<|im_end|>") || token.contains("<|endoftext|>")) {
+          final cleanToken = token.replaceAll("<|im_end|>", "").replaceAll("<|endoftext|>", "");
+          if (cleanToken.isNotEmpty) yield cleanToken;
+          await stop();
+          break;
+        }
         yield token;
       }
     } catch (e) {
@@ -772,7 +778,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "2.3.7";
+  final String _versionHub = "2.3.9";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/vantablack_hub.apk";
 
   CoreMode _currentMode = CoreMode.normal;
@@ -848,7 +854,7 @@ class _VantablackHomeState extends State<VantablackHome> {
         final data = response.data;
         if (data is Map<String, dynamic>) {
           final remoteBuild = data['buildNumber'] as int? ?? 23;
-          final remoteVersion = data['version'] as String? ?? "2.3.5";
+          final remoteVersion = data['version'] as String? ?? "2.3.9";
           final remoteUrl = data['url'] as String? ?? _urlApkRemoto;
 
           const int currentBuild = 23;
