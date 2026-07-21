@@ -1,7 +1,9 @@
-import 'dart:io';
+import 'dart:io'; 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui'; // Necesario para PlatformDispatcher
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb; // Compatibilidad Web
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -77,93 +79,19 @@ void main() {
     );
   };
 
-  // Capturar errores asíncronos globales (fuera del framework de Flutter)
-  runZonedGuarded(() {
-    runApp(const VantablackApp());
-  }, (Object error, StackTrace stack) {
-    runApp(VantablackErrorApp(error: error, stackTrace: stack));
-  });
-}
+  // Capturar errores asíncronos de forma segura sin provocar un crash total en caliente
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+  };
 
-// App de contingencia para errores asíncronos críticos
-class VantablackErrorApp extends StatelessWidget {
-  final Object error;
-  final StackTrace stackTrace;
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    debugPrint("ASYNCHRONOUS EXCEPTION DETECTED: $error");
+    debugPrint(stack.toString());
+    // Retornamos true para indicar que el error ha sido controlado sin tumbar el árbol de la UI
+    return true;
+  };
 
-  const VantablackErrorApp({
-    super.key,
-    required this.error,
-    required this.stackTrace,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF020408),
-      ),
-      home: Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 32),
-                      SizedBox(width: 8),
-                      Text(
-                        "ASYNCHRONOUS CRITICAL ERROR",
-                        style: TextStyle(
-                          color: Colors.redAccent,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    error.toString(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    "Stacktrace:",
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    stackTrace.toString(),
-                    style: const TextStyle(
-                      color: Colors.white30,
-                      fontSize: 10,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  runApp(const VantablackApp());
 }
 
 class VantablackApp extends StatelessWidget {
@@ -207,7 +135,8 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    if ((username == "admin" && password == "admin") || username == "gustavo" || password == "zynoox") {
+    // CORREGIDO: Agrupación correcta con operadores booleanos para evitar login no deseado de gustavo/zynoox
+    if ((username == "admin" && password == "admin") || (username == "gustavo" && password == "zynoox")) {
       setState(() {
         _errorMessage = null;
       });
@@ -220,6 +149,13 @@ class _LoginScreenState extends State<LoginScreen> {
         _errorMessage = "Credenciales incorrectas.";
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   @override
@@ -376,28 +312,39 @@ class LocalModel {
 
 class HardwareScanner {
   static Future<Map<String, dynamic>> scan() async {
-    final cores = Platform.numberOfProcessors;
+    final cores = kIsWeb ? 1 : Platform.numberOfProcessors;
     double freeRamGb = 4.0; // Fallback predeterminado
 
-    if (Platform.isAndroid || Platform.isLinux) {
+    // CORREGIDO: Soporte multiplataforma seguro y lectura completa sin 'break' prematuro en meminfo
+    if (!kIsWeb && (Platform.isAndroid || Platform.isLinux)) {
       try {
         final file = File('/proc/meminfo');
         if (await file.exists()) {
           final lines = await file.readAsLines();
+          double? memAvailable;
+          double? memFree;
+          
           for (var line in lines) {
-            if (line.startsWith('MemAvailable:') || line.startsWith('MemFree:')) {
+            if (line.startsWith('MemAvailable:')) {
               final parts = line.split(RegExp(r'\s+'));
               final kb = double.tryParse(parts[1]);
               if (kb != null) {
-                freeRamGb = kb / (1024 * 1024);
-                break;
+                memAvailable = kb / (1024 * 1024);
+              }
+            } else if (line.startsWith('MemFree:')) {
+              final parts = line.split(RegExp(r'\s+'));
+              final kb = double.tryParse(parts[1]);
+              if (kb != null) {
+                memFree = kb / (1024 * 1024);
               }
             }
           }
+          // Usamos la memoria realmente disponible en vez de solo la libre
+          freeRamGb = memAvailable ?? memFree ?? 4.0;
         }
       } catch (_) {}
     } else {
-      // Para Windows/Mac en desarrollo local, asignamos un valor simulado representativo
+      // Para Windows/Mac/Web en desarrollo local, asignamos un valor simulado representativo
       freeRamGb = cores > 4 ? 6.5 : 3.2;
     }
 
@@ -415,12 +362,17 @@ class LocalLLMService {
 
   final LlamaController _controller = LlamaController();
   bool _isModelLoaded = false;
+  bool _isGenerating = false; // CORREGIDO: Variable local para rastrear el estado de inferencia
   String _modelPath = '';
+
+  bool get isGenerating => _isGenerating;
+  bool get isModelLoaded => _isModelLoaded;
 
   Future<void> stop() async {
     try {
-      if (_controller.isGenerating) {
+      if (_isGenerating) {
         await _controller.stop();
+        _isGenerating = false;
       }
     } catch (_) {}
   }
@@ -433,21 +385,19 @@ class LocalLLMService {
     }
 
     if (_isModelLoaded && _modelPath == path) {
-      try {
-        final loaded = await _controller.isModelLoaded();
-        if (loaded) return; // Ya está cargado y listo
-      } catch (_) {}
+      return; // Ya está cargado y listo
     }
 
     // Liberar memoria gráfica y garbage collector antes de cargar modelo nativo en C++
     ZRamMemoryManager.optimizeMemory(true);
 
-    try {
-      final loaded = await _controller.isModelLoaded();
-      if (loaded) {
+    // CORREGIDO: Evitar llamar a isModelLoaded() de LlamaController, usar nuestra bandera _isModelLoaded
+    if (_isModelLoaded) {
+      try {
         await _controller.dispose();
-      }
-    } catch (_) {}
+      } catch (_) {}
+      _isModelLoaded = false;
+    }
 
     _modelPath = path;
 
@@ -474,9 +424,11 @@ class LocalLLMService {
       return;
     }
 
-    if (_controller.isGenerating) {
+    if (_isGenerating) {
       await stop();
     }
+
+    _isGenerating = true;
 
     final StringBuffer fullPromptBuffer = StringBuffer();
     
@@ -538,17 +490,19 @@ class LocalLLMService {
       }
     } catch (e) {
       yield " [Error de Inferencia: $e]";
+    } finally {
+      _isGenerating = false;
     }
   }
 }
 
 final List<LocalModel> localModels = [
   LocalModel(
-    id: "qwen_0.5b_instruct_q4",
-    name: "Qwen 2.5 0.5B (Instruct)",
+    id: "qwen_0.5b_chat_q4",
+    name: "Qwen 1.5 0.5B (Chat)",
     size: "0.4 GB",
     requiredRamGb: 1.5,
-    urlGguf: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    urlGguf: "https://huggingface.co/Qwen/Qwen1.5-0.5B-Chat-GGUF/resolve/main/qwen1_5-0_5b-chat-q4_k_m.gguf",
   ),
   LocalModel(
     id: "gemma_2b",
@@ -582,6 +536,7 @@ class ChatThread {
   List<Map<String, String>> messages;
   bool modeloInicializado;
   String? rutaModeloLocal;
+  bool pensando; // CORREGIDO: Añadido para controlar el bloqueo de input de forma local en cada chat
 
   ChatThread({
     required this.id,
@@ -592,6 +547,7 @@ class ChatThread {
     required this.messages,
     this.modeloInicializado = false,
     this.rutaModeloLocal,
+    this.pensando = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -616,6 +572,7 @@ class ChatThread {
         ),
         modeloInicializado: json['modeloInicializado'] ?? false,
         rutaModeloLocal: json['rutaModeloLocal'],
+        pensando: false, // Por defecto al cargar, no está pensando
       );
 }
 
@@ -821,9 +778,11 @@ class _VantablackHomeState extends State<VantablackHome> {
   List<ChatThread> _threads = [];
   String? _activeThreadId;
 
-  bool _descargando = false;
-  bool _pensando = false;
-  double _progreso = 0.0;
+  // CORREGIDO: Estados de descarga independientes
+  bool _descargandoOta = false;
+  bool _descargandoModelo = false;
+  double _progresoOta = 0.0;
+  double _progresoModelo = 0.0;
   String _estadoTexto = "Vantablack Core Active";
 
   double _freeRamGb = 4.0;
@@ -862,6 +821,14 @@ class _VantablackHomeState extends State<VantablackHome> {
       // Chequear actualizaciones silenciosamente en segundo plano
       await _checkUpdates();
     });
+  }
+
+  // CORREGIDO: Liberar controladores de manera limpia
+  @override
+  void dispose() {
+    _chatController.dispose();
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _checkUpdates() async {
@@ -986,7 +953,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           id: initialId,
           title: "Instancia Qwen 0.5B",
           botName: "KAI",
-          iaModel: "Qwen 2.5 0.5B (Instruct)",
+          iaModel: "Qwen 1.5 0.5B (Chat)",
           modeName: "Normal",
           modeloInicializado: false,
           messages: [
@@ -1026,15 +993,24 @@ class _VantablackHomeState extends State<VantablackHome> {
   }
 
   Future<void> _procesarMensajeLocal() async {
-    if (_chatController.text.trim().isEmpty || _pensando) return;
-
     final threadActual = _activeThread;
+    if (_chatController.text.trim().isEmpty || threadActual.pensando) return; // CORREGIDO: Comprobar variable 'pensando' por hilo
+
     final textoUsuario = _chatController.text.trim();
 
     // Resolver la ruta real del modelo seleccionado dinámicamente
     final directory = await getApplicationDocumentsDirectory();
+
+    // Limpiar versión previa incompatible de Qwen 2.5 si existe en disco
+    final oldModelFile = File("${directory.path}/qwen_0.5b_instruct_q4.gguf");
+    if (await oldModelFile.exists()) {
+      try { await oldModelFile.delete(); } catch (_) {}
+    }
+
     final modelInfo = localModels.firstWhere(
-      (m) => m.name == threadActual.iaModel,
+      (m) => m.name == threadActual.iaModel ||
+             m.id == threadActual.iaModel ||
+             (threadActual.iaModel.toLowerCase().contains("qwen") && m.id.contains("qwen")),
       orElse: () => localModels.first,
     );
     final rutaModelo = "${directory.path}/${modelInfo.id}.gguf";
@@ -1070,7 +1046,7 @@ class _VantablackHomeState extends State<VantablackHome> {
     _chatController.clear();
 
     setState(() {
-      _pensando = true;
+      threadActual.pensando = true; // CORREGIDO: Bloquear input solo para este hilo
       threadActual.messages.add({"sender": "user", "text": textoUsuario});
       threadActual.messages.add({"sender": "assistant", "text": "..."});
     });
@@ -1112,14 +1088,14 @@ class _VantablackHomeState extends State<VantablackHome> {
 
       if (!mounted) return;
       setState(() {
-        _pensando = false;
+        threadActual.pensando = false;
       });
       _guardarDatosEnDisco();
 
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _pensando = false;
+        threadActual.pensando = false;
         threadActual.messages[indiceRespuesta]["text"] = "Error de procesamiento local: $e";
       });
     }
@@ -1192,9 +1168,9 @@ class _VantablackHomeState extends State<VantablackHome> {
   }
 
   Future<void> _ejecutarActualizacionOTA([String? targetUrl]) async {
-    if (_descargando) return;
+    if (_descargandoOta) return; // CORREGIDO: Validar variable OTA propia
 
-    if (!Platform.isAndroid) {
+    if (kIsWeb || !Platform.isAndroid) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("⚠️ Las actualizaciones OTA solo están soportadas en Android."),
@@ -1206,7 +1182,7 @@ class _VantablackHomeState extends State<VantablackHome> {
 
     final downloadUrl = targetUrl ?? _urlApkRemoto;
 
-    setState(() { _descargando = true; _estadoTexto = "Conectando al Hub..."; });
+    setState(() { _descargandoOta = true; _estadoTexto = "Conectando al Hub..."; });
     try {
       final dio = Dio();
       final dir = await getApplicationDocumentsDirectory();
@@ -1224,7 +1200,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           if (total != -1) {
             if (!mounted) return;
             setState(() {
-              _progreso = recibido / total;
+              _progresoOta = recibido / total;
               _estadoTexto = "Descarga OTA: ${(recibido / 1024 / 1024).toStringAsFixed(1)} MB / ${(total / 1024 / 1024).toStringAsFixed(1)} MB";
             });
           }
@@ -1232,7 +1208,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       );
       
       if (!mounted) return;
-      setState(() { _descargando = false; _estadoTexto = "Instalando versión v$_versionHub..."; });
+      setState(() { _descargandoOta = false; _estadoTexto = "Instalando versión v$_versionHub..."; });
       final result = await OpenFile.open(
         ruta,
         type: "application/vnd.android.package-archive",
@@ -1249,7 +1225,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() { _descargando = false; _estadoTexto = "Vantablack Core Active"; });
+      setState(() { _descargandoOta = false; _estadoTexto = "Vantablack Core Active"; });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("No se pudo completar la actualización OTA: $e")),
       );
@@ -1257,15 +1233,19 @@ class _VantablackHomeState extends State<VantablackHome> {
   }
 
   Future<void> _descargarModeloLlmNativamente(ChatThread thread) async {
+    if (_descargandoModelo) return; // Evitar descargas duplicadas del modelo
+
     setState(() {
-      _descargando = true;
-      _progreso = 0.0;
+      _descargandoModelo = true; // CORREGIDO: Estado de modelo independiente
+      _progresoModelo = 0.0;
       _estadoTexto = "Cargando modelo local...";
     });
 
     try {
       final model = localModels.firstWhere(
-        (m) => m.name == thread.iaModel,
+        (m) => m.name == thread.iaModel ||
+               m.id == thread.iaModel ||
+               (thread.iaModel.toLowerCase().contains("qwen") && m.id.contains("qwen")),
         orElse: () => localModels.first,
       );
 
@@ -1286,7 +1266,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           if (total != -1) {
             if (!mounted) return;
             setState(() {
-              _progreso = recibido / total;
+              _progresoModelo = recibido / total;
               _estadoTexto = "Descargando: ${(recibido / 1024 / 1024).toStringAsFixed(0)}MB / ${(total / 1024 / 1024).toStringAsFixed(0)}MB";
             });
           }
@@ -1305,7 +1285,7 @@ class _VantablackHomeState extends State<VantablackHome> {
 
       if (!mounted) return;
       setState(() {
-        _descargando = false;
+        _descargandoModelo = false;
         thread.modeloInicializado = true;
         thread.rutaModeloLocal = rutaDestino;
         model.isDownloaded = true;
@@ -1316,7 +1296,7 @@ class _VantablackHomeState extends State<VantablackHome> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _descargando = false;
+        _descargandoModelo = false;
         thread.modeloInicializado = false;
         _estadoTexto = "Fallo al descargar modelo";
       });
@@ -1332,7 +1312,12 @@ class _VantablackHomeState extends State<VantablackHome> {
     final modelName = parts.length > 2 ? parts[2] : parts.last;
     
     final dir = await getApplicationDocumentsDirectory();
-    final model = localModels.firstWhere((m) => m.name == modelo);
+    final model = localModels.firstWhere(
+      (m) => m.name == modelo ||
+             m.id == modelo ||
+             (modelo.toLowerCase().contains("qwen") && m.id.contains("qwen")),
+      orElse: () => localModels.first,
+    );
     final rutaLocal = "${dir.path}/${model.id}.gguf";
 
     final nuevoThread = ChatThread(
@@ -1344,6 +1329,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       messages: [],
       modeloInicializado: isDownloaded,
       rutaModeloLocal: isDownloaded ? rutaLocal : null,
+      pensando: false,
     );
 
     setState(() {
@@ -2001,10 +1987,30 @@ class _VantablackHomeState extends State<VantablackHome> {
                     },
                   ),
                 ),
-                if (_descargando)
+                // CORREGIDO: Indicadores de descarga independientes en la barra lateral
+                if (_descargandoOta)
                   Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: LinearProgressIndicator(value: _progreso, color: const Color(0xFFFF9500), minHeight: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("Descargando actualización...", style: TextStyle(fontSize: 9, color: Colors.amber)),
+                        const SizedBox(height: 4),
+                        LinearProgressIndicator(value: _progresoOta, color: const Color(0xFFFF9500), minHeight: 2),
+                      ],
+                    ),
+                  ),
+                if (_descargandoModelo)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("Descargando pesos de IA...", style: TextStyle(fontSize: 9, color: Color(0xFF00B4D8))),
+                        const SizedBox(height: 4),
+                        LinearProgressIndicator(value: _progresoModelo, color: const Color(0xFF00B4D8), minHeight: 2),
+                      ],
+                    ),
                   ),
                 Padding(
                   padding: const EdgeInsets.all(20),
@@ -2050,8 +2056,9 @@ class _VantablackHomeState extends State<VantablackHome> {
                             children: [
                               const Icon(Icons.memory_rounded, size: 12, color: Color(0xFF00B4D8)),
                               const SizedBox(width: 6),
+                              // CORREGIDO: Quitado el texto engañoso que mentía diciendo que Qwen era "Gemini 1.5 Flash"
                               Text(
-                                "Modelo: ${_activeThread.iaModel.contains('Qwen') ? 'Gemini 1.5 Flash' : _activeThread.iaModel}",
+                                "Modelo: ${_activeThread.iaModel}",
                                 style: const TextStyle(
                                   fontSize: 11,
                                   color: Color(0xFF00B4D8),
@@ -2114,13 +2121,13 @@ class _VantablackHomeState extends State<VantablackHome> {
                   
                   Container(
                     padding: const EdgeInsets.all(20),
-                    child: _descargando 
+                    child: _descargandoModelo 
                         ? Column(
                             children: [
-                              LinearProgressIndicator(value: _progreso, color: const Color(0xFF00B4D8)),
+                              LinearProgressIndicator(value: _progresoModelo, color: const Color(0xFF00B4D8)),
                               const SizedBox(height: 8),
                               Text(
-                                "Descargando modelo: ${(_progreso * 100).toStringAsFixed(0)}% completado",
+                                "Descargando modelo: ${(_progresoModelo * 100).toStringAsFixed(0)}% completado",
                                 style: const TextStyle(fontSize: 12, color: Colors.white54),
                               ),
                             ],
@@ -2143,9 +2150,10 @@ class _VantablackHomeState extends State<VantablackHome> {
                                     child: TextField(
                                       controller: _chatController,
                                       style: const TextStyle(color: Colors.white, fontSize: 14),
+                                      // CORREGIDO: Comprobación de estado pensando local en vez de global
                                       onSubmitted: (_) => _procesarMensajeLocal(),
                                       decoration: InputDecoration(
-                                        hintText: _pensando ? "Procesando matriz nativa..." : "Enviar comando local...",
+                                        hintText: _activeThread.pensando ? "Procesando matriz nativa..." : "Enviar comando local...",
                                         hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
                                         fillColor: const Color(0xFF05070B),
                                         filled: true,
@@ -2157,7 +2165,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                                   ),
                                   const SizedBox(width: 10),
                                   IconButton(
-                                    icon: _pensando 
+                                    icon: _activeThread.pensando 
                                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                       : const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
                                     style: IconButton.styleFrom(
@@ -2165,7 +2173,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                                       minimumSize: const Size(48, 48),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                     ),
-                                    onPressed: _pensando ? null : _procesarMensajeLocal,
+                                    onPressed: _activeThread.pensando ? null : _procesarMensajeLocal,
                                   ),
                                 ],
                               ),
