@@ -477,12 +477,13 @@ class LocalLLMService {
     fullPromptBuffer.writeln("<|im_start|>assistant");
 
     try {
-      // Inferencia nativa ultra-estable con maxTokens recortado a 256 para prevenir picos de memoria
+      // Inferencia nativa ultra-estable con parámetros afinados para evitar respuestas repetitivas
       final stream = _controller.generate(
         prompt: fullPromptBuffer.toString(),
         maxTokens: 256,
-        temperature: variables['isModoPro'] == true ? 0.7 : 0.5,
-        repeatPenalty: 1.18,
+        temperature: 0.7,
+        topP: 0.9,
+        repeatPenalty: 1.15,
       );
 
       await for (var token in stream) {
