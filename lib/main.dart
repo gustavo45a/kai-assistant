@@ -298,6 +298,9 @@ class LocalModel {
   final String size;
   final double requiredRamGb;
   final String urlGguf;
+  final String badge;
+  final Color badgeColor;
+  final String description;
   bool isDownloaded;
 
   LocalModel({
@@ -306,6 +309,9 @@ class LocalModel {
     required this.size,
     required this.requiredRamGb,
     required this.urlGguf,
+    required this.badge,
+    required this.badgeColor,
+    required this.description,
     this.isDownloaded = false,
   });
 }
@@ -313,19 +319,26 @@ class LocalModel {
 class HardwareScanner {
   static Future<Map<String, dynamic>> scan() async {
     final cores = kIsWeb ? 1 : Platform.numberOfProcessors;
-    double freeRamGb = 4.0; // Fallback predeterminado
+    double freeRamGb = 4.0;
+    double totalRamGb = 8.0;
 
-    // CORREGIDO: Soporte multiplataforma seguro y lectura completa sin 'break' prematuro en meminfo
     if (!kIsWeb && (Platform.isAndroid || Platform.isLinux)) {
       try {
         final file = File('/proc/meminfo');
         if (await file.exists()) {
           final lines = await file.readAsLines();
+          double? memTotal;
           double? memAvailable;
           double? memFree;
           
           for (var line in lines) {
-            if (line.startsWith('MemAvailable:')) {
+            if (line.startsWith('MemTotal:')) {
+              final parts = line.split(RegExp(r'\s+'));
+              final kb = double.tryParse(parts[1]);
+              if (kb != null) {
+                memTotal = kb / (1024 * 1024);
+              }
+            } else if (line.startsWith('MemAvailable:')) {
               final parts = line.split(RegExp(r'\s+'));
               final kb = double.tryParse(parts[1]);
               if (kb != null) {
@@ -339,18 +352,22 @@ class HardwareScanner {
               }
             }
           }
-          // Usamos la memoria realmente disponible en vez de solo la libre
           freeRamGb = memAvailable ?? memFree ?? 4.0;
+          totalRamGb = memTotal ?? 8.0;
         }
       } catch (_) {}
     } else {
-      // Para Windows/Mac/Web en desarrollo local, asignamos un valor simulado representativo
-      freeRamGb = cores > 4 ? 6.5 : 3.2;
+      freeRamGb = cores > 4 ? 5.5 : 3.2;
+      totalRamGb = cores > 4 ? 8.0 : 4.0;
     }
+
+    final recommendedModelId = totalRamGb >= 7.5 ? "llama_3_2_1b" : "qwen_0.5b_chat_q4";
 
     return {
       'cores': cores,
       'freeRamGb': freeRamGb,
+      'totalRamGb': totalRamGb,
+      'recommendedModelId': recommendedModelId,
     };
   }
 }
@@ -506,31 +523,63 @@ class LocalLLMService {
 final List<LocalModel> localModels = [
   LocalModel(
     id: "qwen_0.5b_chat_q4",
-    name: "Qwen 1.5 0.5B (Chat)",
+    name: "Qwen 1.5 0.5B Chat",
     size: "0.4 GB",
     requiredRamGb: 1.5,
     urlGguf: "https://huggingface.co/Qwen/Qwen1.5-0.5B-Chat-GGUF/resolve/main/qwen1_5-0_5b-chat-q4_k_m.gguf",
+    badge: "Ultra Rápido",
+    badgeColor: const Color(0xFF2ECC71),
+    description: "Inferencia ultra rápida con consumo mínimo de memoria RAM.",
+  ),
+  LocalModel(
+    id: "llama_3_2_1b",
+    name: "Llama 3.2 1B Instruct",
+    size: "0.8 GB",
+    requiredRamGb: 2.5,
+    urlGguf: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    badge: "⭐ Recomendado",
+    badgeColor: const Color(0xFF00B4D8),
+    description: "Excelente equilibrio entre velocidad, uso de RAM y fluidez en español.",
+  ),
+  LocalModel(
+    id: "smollm2_1.7b",
+    name: "SmolLM2 1.7B Chat",
+    size: "1.1 GB",
+    requiredRamGb: 3.0,
+    urlGguf: "https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF/resolve/main/smollm2-1.7b-instruct-q4_k_m.gguf",
+    badge: "Alta Fluidez",
+    badgeColor: const Color(0xFF00E676),
+    description: "Gran fluidez en diálogos y seguimiento razonado de instrucciones.",
   ),
   LocalModel(
     id: "gemma_2b",
     name: "Gemma 2 2B (GGUF)",
     size: "1.6 GB",
-    requiredRamGb: 3.5,
-    urlGguf: "https://huggingface.co/google/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+    requiredRamGb: 3.8,
+    urlGguf: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+    badge: "Calidad Alta",
+    badgeColor: const Color(0xFF0284C7),
+    description: "Modelo potente de Google en espejo público directo de bartowski.",
   ),
   LocalModel(
-    id: "phi_3_mini",
-    name: "Phi 3 Mini 3.8B (GGUF)",
-    size: "2.2 GB",
-    requiredRamGb: 5.5,
-    urlGguf: "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf",
+    id: "llama_3_2_3b",
+    name: "Llama 3.2 3B Instruct",
+    size: "2.0 GB",
+    requiredRamGb: 5.0,
+    urlGguf: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    badge: "Respuestas Profundas",
+    badgeColor: const Color(0xFFF59E0B),
+    description: "Respuestas detalladas con capacidad analítica superior.",
   ),
   LocalModel(
-    id: "llama_3_8b",
-    name: "Llama 3 8B (Quantized)",
-    size: "4.7 GB",
-    requiredRamGb: 9.0,
-    urlGguf: "https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf",
+    id: "qwen_2.5_7b",
+    name: "Qwen 2.5 7B Instruct",
+    size: "4.2 GB",
+    requiredRamGb: 8.5,
+    urlGguf: "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
+    badge: "Uso Alto de RAM",
+    badgeColor: const Color(0xFFEF4444),
+    description: "Modelo avanzado para tareas complejas en dispositivos con mucha RAM.",
   ),
 ];
 
@@ -778,7 +827,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "2.3.9";
+  final String _versionHub = "2.9.0";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/vantablack_hub.apk";
 
   CoreMode _currentMode = CoreMode.normal;
@@ -793,6 +842,8 @@ class _VantablackHomeState extends State<VantablackHome> {
   String _estadoTexto = "Vantablack Core Active";
 
   double _freeRamGb = 4.0;
+  double _totalRamGb = 8.0;
+  String _recommendedModelId = "llama_3_2_1b";
   int _cpuCores = 4;
 
   bool isZRamEnabled = true;
@@ -820,6 +871,8 @@ class _VantablackHomeState extends State<VantablackHome> {
         setState(() {
           _cpuCores = diagnostic['cores'];
           _freeRamGb = diagnostic['freeRamGb'];
+          _totalRamGb = diagnostic['totalRamGb'];
+          _recommendedModelId = diagnostic['recommendedModelId'];
         });
       }
       await _verificarModelosDescargados();
@@ -854,7 +907,7 @@ class _VantablackHomeState extends State<VantablackHome> {
         final data = response.data;
         if (data is Map<String, dynamic>) {
           final remoteBuild = data['buildNumber'] as int? ?? 23;
-          final remoteVersion = data['version'] as String? ?? "2.3.9";
+          final remoteVersion = data['version'] as String? ?? "2.9.0";
           final remoteUrl = data['url'] as String? ?? _urlApkRemoto;
 
           const int currentBuild = 23;
@@ -1372,6 +1425,8 @@ class _VantablackHomeState extends State<VantablackHome> {
       builder: (BuildContext context) {
         return ConfigureInstanceDialog(
           freeRamGb: _freeRamGb,
+          totalRamGb: _totalRamGb,
+          recommendedModelId: _recommendedModelId,
           models: localModels,
           onConfirm: (bot, modelo, isDownloaded) {
             _crearNuevaInstanciaChat(bot, modelo, isDownloaded);
@@ -1382,12 +1437,17 @@ class _VantablackHomeState extends State<VantablackHome> {
   }
 
   Widget _buildHardwareTelemetryCard() {
-    final ramStatus = _freeRamGb < 4.0 
-        ? "Limitado (Modelos < 3B)" 
-        : (_freeRamGb < 8.0 ? "Estándar (Modelos < 8B)" : "Excelente (Todos)");
-    final ramColor = _freeRamGb < 4.0 
-        ? Colors.redAccent 
-        : (_freeRamGb < 8.0 ? Colors.amberAccent : const Color(0xFF00B4D8));
+    final ramStatus = _totalRamGb >= 7.5
+        ? "Excelente (Modelos 1B - 3B)"
+        : (_freeRamGb >= 4.0 ? "Estándar (Modelos 0.5B - 1.7B)" : "Limitado (Modelos < 1B)");
+    final ramColor = _totalRamGb >= 7.5
+        ? const Color(0xFF00B4D8)
+        : (_freeRamGb >= 4.0 ? Colors.amberAccent : Colors.redAccent);
+
+    final recModel = localModels.firstWhere(
+      (m) => m.id == _recommendedModelId,
+      orElse: () => localModels[1],
+    );
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -1405,7 +1465,7 @@ class _VantablackHomeState extends State<VantablackHome> {
               Icon(Icons.analytics_rounded, size: 14, color: ramColor),
               const SizedBox(width: 6),
               const Text(
-                "TELEMETRÍA DE HARDWARE",
+                "TELEMETRÍA Y RECOMENDACIÓN NATIVA",
                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white70),
               ),
             ],
@@ -1414,7 +1474,7 @@ class _VantablackHomeState extends State<VantablackHome> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Núcleos CPU:", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              const Text("CPU Cores:", style: TextStyle(fontSize: 11, color: Colors.white38)),
               Text("$_cpuCores Cores", style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
             ],
           ),
@@ -1422,20 +1482,46 @@ class _VantablackHomeState extends State<VantablackHome> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("RAM Estimada:", style: TextStyle(fontSize: 11, color: Colors.white38)),
-              Text("${_freeRamGb.toStringAsFixed(1)} GB", style: TextStyle(fontSize: 11, color: ramColor, fontWeight: FontWeight.bold)),
+              const Text("RAM Física Total:", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              Text("${_totalRamGb.toStringAsFixed(1)} GB", style: TextStyle(fontSize: 11, color: ramColor, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Diagnóstico:", style: TextStyle(fontSize: 11, color: Colors.white38)),
-              Text(
-                ramStatus,
-                style: TextStyle(fontSize: 11, color: ramColor, fontWeight: FontWeight.bold),
-              ),
+              const Text("RAM Disponible:", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              Text("${_freeRamGb.toStringAsFixed(1)} GB", style: const TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.bold)),
             ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Diagnóstico RAM:", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              Text(ramStatus, style: TextStyle(fontSize: 11, color: ramColor, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00B4D8).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF00B4D8).withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.star_rounded, color: Color(0xFF00B4D8), size: 16),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    "⭐ Sugerido: ${recModel.name} (${recModel.size})",
+                    style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -2198,12 +2284,16 @@ class _VantablackHomeState extends State<VantablackHome> {
 
 class ConfigureInstanceDialog extends StatefulWidget {
   final double freeRamGb;
+  final double totalRamGb;
+  final String recommendedModelId;
   final List<LocalModel> models;
   final Function(String bot, String modelo, bool isDownloaded) onConfirm;
 
   const ConfigureInstanceDialog({
     super.key,
     required this.freeRamGb,
+    required this.totalRamGb,
+    required this.recommendedModelId,
     required this.models,
     required this.onConfirm,
   });
@@ -2219,122 +2309,273 @@ class _ConfigureInstanceDialogState extends State<ConfigureInstanceDialog> {
   @override
   void initState() {
     super.initState();
-    selectedIA = widget.models.first.name;
+    final rec = widget.models.firstWhere(
+      (m) => m.id == widget.recommendedModelId,
+      orElse: () => widget.models.first,
+    );
+    selectedIA = rec.name;
   }
 
   @override
   Widget build(BuildContext context) {
+    final recModel = widget.models.firstWhere(
+      (m) => m.id == widget.recommendedModelId,
+      orElse: () => widget.models[1],
+    );
+
     return AlertDialog(
-      backgroundColor: const Color(0xFF131722),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      backgroundColor: const Color(0xFF0D111A),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: const Row(
         children: [
-          Icon(Icons.memory_rounded, color: Color(0xFF00B4D8)),
+          Icon(Icons.memory_rounded, color: Color(0xFF00B4D8), size: 22),
           SizedBox(width: 10),
-          Text("Configurar Nueva Instancia Local", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          Text(
+            "Matriz de Instancias y Modelos GGUF",
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
         ],
       ),
       content: SizedBox(
-        width: 450,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Elegir Personalidad del Bot:", style: TextStyle(fontSize: 12, color: Colors.white38)),
-            DropdownButton<String>(
-              value: selectedBot,
-              isExpanded: true,
-              dropdownColor: const Color(0xFF131722),
-              items: ["KAI", "SELENE", "CHRONOS"]
-                  .map((val) => DropdownMenuItem(value: val, child: Text(val)))
-                  .toList(),
-              onChanged: (val) {
-                if (val != null) setState(() => selectedBot = val);
-              },
-            ),
-            const SizedBox(height: 16),
-            const Text("Asignar Modelo IA Local:", style: TextStyle(fontSize: 12, color: Colors.white38)),
-            const SizedBox(height: 8),
-            Container(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: widget.models.length,
-                itemBuilder: (context, index) {
-                  final model = widget.models[index];
-                  final isRecommended = widget.freeRamGb >= model.requiredRamGb;
-                  final isSelected = selectedIA == model.name;
-
-                  return Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFF00B4D8).withValues(alpha: 0.08) : Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isSelected ? const Color(0xFF00B4D8) : Colors.white10,
-                        width: isSelected ? 1.2 : 0.8,
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 1. BANNER VISUAL DE RECOMENDACIÓN INTELIGENTE
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      const Color(0xFF00B4D8).withValues(alpha: 0.15),
+                      const Color(0xFF0077B6).withValues(alpha: 0.05),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF00B4D8).withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00B4D8),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.star_rounded, size: 12, color: Colors.black),
+                              SizedBox(width: 4),
+                              Text(
+                                "⭐ RECOMENDADO PARA TU HARDWARE",
+                                style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      recModel.name,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "RAM Total: ${widget.totalRamGb.toStringAsFixed(1)} GB | RAM Libre: ${widget.freeRamGb.toStringAsFixed(1)} GB",
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF00B4D8), fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      recModel.description,
+                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.check_circle_rounded, size: 14, color: Color(0xFF00B4D8)),
+                        label: Text(
+                          selectedIA == recModel.name ? "Recomendado Seleccionado" : "Seleccionar Recomendado (${recModel.size})",
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF00B4D8), fontWeight: FontWeight.bold),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFF00B4D8)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            selectedIA = recModel.name;
+                          });
+                        },
                       ),
                     ),
-                    child: ListTile(
-                      dense: true,
-                      title: Text(model.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                      subtitle: Text("Tamaño: ${model.size} | RAM Requerida: ${model.requiredRamGb} GB", style: const TextStyle(fontSize: 11, color: Colors.white38)),
-                      trailing: Wrap(
-                        spacing: 6,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: isRecommended ? Colors.green.withValues(alpha: 0.15) : Colors.red.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              isRecommended ? "Recomendado" : "No recomendado",
-                              style: TextStyle(color: isRecommended ? Colors.green : Colors.red, fontSize: 9, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: model.isDownloaded ? Colors.blue.withValues(alpha: 0.15) : Colors.white10,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              model.isDownloaded ? "Listo" : "No descargado",
-                              style: TextStyle(color: model.isDownloaded ? Colors.blue : Colors.white54, fontSize: 9, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+              const Text("Elegir Personalidad del Bot:", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70)),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                initialValue: selectedBot,
+                isExpanded: true,
+                dropdownColor: const Color(0xFF131722),
+                decoration: InputDecoration(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  filled: true,
+                  fillColor: const Color(0xFF181F2E),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                ),
+                items: ["KAI", "SELENE", "CHRONOS"]
+                    .map((val) => DropdownMenuItem(value: val, child: Text(val, style: const TextStyle(color: Colors.white, fontSize: 13))))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) setState(() => selectedBot = val);
+                },
+              ),
+
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Catálogo Abierto (Selección Libre):", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70)),
+                  Text("${widget.models.length} Modelos", style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // 2. CATÁLOGO COMPLETO DE SELECCIÓN LIBRE CON BADGES
+              Container(
+                constraints: const BoxConstraints(maxHeight: 280),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: widget.models.length,
+                  itemBuilder: (context, index) {
+                    final model = widget.models[index];
+                    final isSelected = selectedIA == model.name;
+
+                    return GestureDetector(
                       onTap: () {
                         setState(() {
                           selectedIA = model.name;
                         });
                       },
-                    ),
-                  );
-                },
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isSelected ? const Color(0xFF00B4D8).withValues(alpha: 0.12) : const Color(0xFF141A26),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected ? const Color(0xFF00B4D8) : Colors.white.withValues(alpha: 0.05),
+                            width: isSelected ? 1.5 : 1.0,
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Icon(
+                              isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                              color: isSelected ? const Color(0xFF00B4D8) : Colors.white38,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          model.name,
+                                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: model.badgeColor.withValues(alpha: 0.2),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: model.badgeColor.withValues(alpha: 0.5), width: 0.8),
+                                        ),
+                                        child: Text(
+                                          model.badge,
+                                          style: TextStyle(color: model.badgeColor, fontSize: 9, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    "Peso: ${model.size} | RAM Mínima: ${model.requiredRamGb} GB",
+                                    style: const TextStyle(fontSize: 10, color: Colors.white54),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    model.description,
+                                    style: const TextStyle(fontSize: 10, color: Colors.white38),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: model.isDownloaded ? Colors.green.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                model.isDownloaded ? "Listo" : "No descargado",
+                                style: TextStyle(
+                                  color: model.isDownloaded ? Colors.greenAccent : Colors.white38,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context), 
-          child: const Text("Cancelar", style: TextStyle(color: Colors.white38))
+          child: const Text("Cancelar", style: TextStyle(color: Colors.white38)),
         ),
-        ElevatedButton(
+        ElevatedButton.icon(
+          icon: const Icon(Icons.add_rounded, size: 16),
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF0077B6), 
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           ),
           onPressed: () {
             Navigator.pop(context);
-            final model = widget.models.firstWhere((m) => m.name == selectedIA);
+            final model = widget.models.firstWhere(
+              (m) => m.name == selectedIA,
+              orElse: () => widget.models.first,
+            );
             widget.onConfirm(selectedBot, selectedIA, model.isDownloaded);
           },
-          child: const Text("Crear Instancia"),
+          label: const Text("Crear Instancia Local"),
         ),
       ],
     );
