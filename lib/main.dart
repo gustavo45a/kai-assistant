@@ -827,7 +827,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "2.9.0";
+  final String _versionHub = "2.9.2";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/vantablack_hub.apk";
 
   CoreMode _currentMode = CoreMode.normal;
@@ -2213,7 +2213,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                   ),
                   
                   Container(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     child: _descargandoModelo 
                         ? Column(
                             children: [
@@ -2237,38 +2237,185 @@ class _VantablackHomeState extends State<VantablackHome> {
                                 icon: const Icon(Icons.download_rounded),
                                 label: Text("Descargar Modelo Nativamente (${_activeThread.iaModel})"),
                               )
-                            : Row(
-                                children: [
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _chatController,
-                                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                                      // CORREGIDO: Comprobación de estado pensando local en vez de global
-                                      onSubmitted: (_) => _procesarMensajeLocal(),
-                                      decoration: InputDecoration(
-                                        hintText: _activeThread.pensando ? "Procesando matriz nativa..." : "Enviar comando local...",
-                                        hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
-                                        fillColor: const Color(0xFF05070B),
-                                        filled: true,
-                                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.white10)),
-                                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF00B4D8), width: 0.8)),
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                            : Container(
+                                margin: const EdgeInsets.only(bottom: 8, left: 6, right: 6),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(28),
+                                  child: BackdropFilter(
+                                    filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0x3B1E1E24),
+                                        borderRadius: BorderRadius.circular(28),
+                                        border: Border.all(
+                                          color: Colors.white.withValues(alpha: 0.18),
+                                          width: 1.2,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.35),
+                                            blurRadius: 20,
+                                            spreadRadius: -2,
+                                            offset: const Offset(0, 6),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          // 1. CAMPO DE TEXTO MULTILÍNEA LIQUID GLASS
+                                          TextField(
+                                            controller: _chatController,
+                                            minLines: 1,
+                                            maxLines: 5,
+                                            style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
+                                            decoration: InputDecoration(
+                                              hintText: _activeThread.pensando ? "Procesando matriz nativa..." : "Escribe un mensaje...",
+                                              hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
+                                              border: InputBorder.none,
+                                              isDense: true,
+                                              contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+
+                                          // 2. BARRA DE HERRAMIENTAS INFERIOR INTEGRADA EN CRISTAL
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              // Lado Izquierdo: Botón '+' en mini píldora translúcida
+                                              InkWell(
+                                                borderRadius: BorderRadius.circular(20),
+                                                onTap: _mostrarSelectorNuevoChat,
+                                                child: Container(
+                                                  padding: const EdgeInsets.all(7),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.white.withValues(alpha: 0.1),
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(color: Colors.white.withValues(alpha: 0.15), width: 0.8),
+                                                  ),
+                                                  child: const Icon(Icons.add_rounded, color: Colors.white, size: 20),
+                                                ),
+                                              ),
+
+                                              // Lado Derecho: Chip de Modo en cristal, Micrófono y Botón Circular Enviar
+                                              Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  // Mini-píldora desplegable de modo en cristal esmerilado
+                                                  GestureDetector(
+                                                    onTap: () {
+                                                      setState(() {
+                                                        _currentMode = _currentMode == CoreMode.normal
+                                                            ? CoreMode.estudiante
+                                                            : CoreMode.normal;
+                                                      });
+                                                    },
+                                                    child: ClipRRect(
+                                                      borderRadius: BorderRadius.circular(16),
+                                                      child: BackdropFilter(
+                                                        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                                        child: Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                                          decoration: BoxDecoration(
+                                                            color: _currentMode == CoreMode.estudiante
+                                                                ? const Color(0xFF9D4EDD).withValues(alpha: 0.25)
+                                                                : const Color(0xFF00B4D8).withValues(alpha: 0.2),
+                                                            borderRadius: BorderRadius.circular(16),
+                                                            border: Border.all(
+                                                              color: _currentMode == CoreMode.estudiante
+                                                                  ? const Color(0xFF9D4EDD).withValues(alpha: 0.6)
+                                                                  : const Color(0xFF00B4D8).withValues(alpha: 0.6),
+                                                              width: 1.0,
+                                                            ),
+                                                          ),
+                                                          child: Row(
+                                                            mainAxisSize: MainAxisSize.min,
+                                                            children: [
+                                                              Icon(
+                                                                _currentMode == CoreMode.estudiante ? Icons.school_rounded : Icons.bolt_rounded,
+                                                                size: 13,
+                                                                color: _currentMode == CoreMode.estudiante ? const Color(0xFFD8B4F8) : const Color(0xFF90E0EF),
+                                                              ),
+                                                              const SizedBox(width: 4),
+                                                              Text(
+                                                                _currentMode == CoreMode.estudiante ? "Estudiante" : "Local",
+                                                                style: TextStyle(
+                                                                  fontSize: 11,
+                                                                  fontWeight: FontWeight.bold,
+                                                                  color: _currentMode == CoreMode.estudiante ? const Color(0xFFD8B4F8) : const Color(0xFF90E0EF),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+
+                                                  // Botón Ícono de Micrófono
+                                                  IconButton(
+                                                    padding: EdgeInsets.zero,
+                                                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                                    icon: const Icon(Icons.mic_none_rounded, color: Colors.white70, size: 20),
+                                                    onPressed: () {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text("🎙️ Entrada de voz nativa activa"),
+                                                          duration: Duration(seconds: 2),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                  const SizedBox(width: 6),
+
+                                                  // Botón Circular de Enviar con resplandor neón
+                                                  GestureDetector(
+                                                    onTap: _activeThread.pensando ? null : _procesarMensajeLocal,
+                                                    child: Container(
+                                                      width: 38,
+                                                      height: 38,
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
+                                                        gradient: LinearGradient(
+                                                          colors: _currentMode == CoreMode.estudiante
+                                                              ? [const Color(0xFFB5179E), const Color(0xFF7209B7)]
+                                                              : [const Color(0xFF00B4D8), const Color(0xFF0077B6)],
+                                                          begin: Alignment.topLeft,
+                                                          end: Alignment.bottomRight,
+                                                        ),
+                                                        boxShadow: [
+                                                          BoxShadow(
+                                                            color: (_currentMode == CoreMode.estudiante ? const Color(0xFFB5179E) : const Color(0xFF00B4D8)).withValues(alpha: 0.5),
+                                                            blurRadius: 10,
+                                                            spreadRadius: 1,
+                                                            offset: const Offset(0, 2),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      child: Center(
+                                                        child: _activeThread.pensando
+                                                            ? const SizedBox(
+                                                                width: 16,
+                                                                height: 16,
+                                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                                              )
+                                                            : const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 10),
-                                  IconButton(
-                                    icon: _activeThread.pensando 
-                                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                      : const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: _currentMode == CoreMode.estudiante ? const Color(0xFF9D4EDD) : const Color(0xFF00B4D8),
-                                      minimumSize: const Size(48, 48),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                    ),
-                                    onPressed: _activeThread.pensando ? null : _procesarMensajeLocal,
-                                  ),
-                                ],
+                                ),
                               ),
                   ),
                 ],
