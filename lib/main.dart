@@ -9,6 +9,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:open_file/open_file.dart';
 import 'package:llama_flutter_android/llama_flutter_android.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:permission_handler/permission_handler.dart';
 
 
 // --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
@@ -827,7 +830,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "2.9.2";
+  final String _versionHub = "2.9.3";
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/vantablack_hub.apk";
 
   CoreMode _currentMode = CoreMode.normal;
@@ -859,12 +862,19 @@ class _VantablackHomeState extends State<VantablackHome> {
   bool _quantizedMedia = true;
   bool isVirtualAssistantActive = false;
 
+  // INSTANCIAS DE AUDIO TTS Y RECONOCIMIENTO DE VOZ STT OFFLINE
+  final FlutterTts _flutterTts = FlutterTts();
+  final stt.SpeechToText _speechToText = stt.SpeechToText();
+  bool _isListening = false;
+  bool _speechInitialized = false;
+
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    _initTts();
     scheduleMicrotask(() async {
       final diagnostic = await HardwareScanner.scan();
       if (mounted) {
@@ -883,9 +893,84 @@ class _VantablackHomeState extends State<VantablackHome> {
     });
   }
 
-  // CORREGIDO: Liberar controladores de manera limpia
+  Future<void> _initTts() async {
+    try {
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        await _flutterTts.setEngine("com.google.android.tts");
+      }
+      await _flutterTts.setLanguage("es-ES");
+      await _flutterTts.setSpeechRate(0.5);
+      await _flutterTts.setVolume(1.0);
+      await _flutterTts.setPitch(1.0);
+    } catch (_) {}
+  }
+
+  Future<void> _hablarRespuesta(String texto) async {
+    if (!_ttsEnabled || texto.trim().isEmpty) return;
+    try {
+      final cleanText = texto
+          .replaceAll(RegExp(r'[\*\#\_\`\>]+'), '')
+          .replaceAll(RegExp(r'\[.*?\]\(.*?\)\s*'), '');
+      await _flutterTts.stop();
+      await _flutterTts.speak(cleanText);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleListening() async {
+    if (_isListening) {
+      await _speechToText.stop();
+      if (mounted) setState(() => _isListening = false);
+      return;
+    }
+
+    var status = await Permission.microphone.request();
+    if (!status.isGranted) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("⚠️ Permiso de micrófono no concedido.")),
+      );
+      return;
+    }
+
+    if (!_speechInitialized) {
+      _speechInitialized = await _speechToText.initialize(
+        onStatus: (st) {
+          if (st == 'done' || st == 'notListening') {
+            if (mounted) setState(() => _isListening = false);
+          }
+        },
+        onError: (err) {
+          if (mounted) setState(() => _isListening = false);
+        },
+      );
+    }
+
+    if (_speechInitialized) {
+      if (mounted) setState(() => _isListening = true);
+      _speechToText.listen(
+        onResult: (result) {
+          if (mounted) {
+            setState(() {
+              _chatController.text = result.recognizedWords;
+              _chatController.selection = TextSelection.fromPosition(
+                TextPosition(offset: _chatController.text.length),
+              );
+            });
+          }
+        },
+        listenOptions: stt.SpeechListenOptions(
+          listenMode: stt.ListenMode.dictation,
+          onDevice: true,
+          partialResults: true,
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
+    _flutterTts.stop();
+    _speechToText.stop();
     _chatController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -1151,6 +1236,11 @@ class _VantablackHomeState extends State<VantablackHome> {
         threadActual.pensando = false;
       });
       _guardarDatosEnDisco();
+
+      // Transmisión de Audio TTS Offline si está activado
+      if (_ttsEnabled) {
+        await _hablarRespuesta(respuestaCompleta);
+      }
 
     } catch (e) {
       if (!mounted) return;
@@ -2356,19 +2446,33 @@ class _VantablackHomeState extends State<VantablackHome> {
                                                   ),
                                                   const SizedBox(width: 8),
 
-                                                  // Botón Ícono de Micrófono
+                                                  // Botón Ícono de Micrófono STT Offline
                                                   IconButton(
                                                     padding: EdgeInsets.zero,
                                                     constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                                    icon: const Icon(Icons.mic_none_rounded, color: Colors.white70, size: 20),
-                                                    onPressed: () {
-                                                      ScaffoldMessenger.of(context).showSnackBar(
-                                                        const SnackBar(
-                                                          content: Text("🎙️ Entrada de voz nativa activa"),
-                                                          duration: Duration(seconds: 2),
-                                                        ),
-                                                      );
-                                                    },
+                                                    icon: AnimatedContainer(
+                                                      duration: const Duration(milliseconds: 300),
+                                                      padding: const EdgeInsets.all(4),
+                                                      decoration: BoxDecoration(
+                                                        color: _isListening ? const Color(0xFFFF0055).withValues(alpha: 0.25) : Colors.transparent,
+                                                        shape: BoxShape.circle,
+                                                        boxShadow: _isListening
+                                                            ? [
+                                                                BoxShadow(
+                                                                  color: const Color(0xFFFF0055).withValues(alpha: 0.6),
+                                                                  blurRadius: 12,
+                                                                  spreadRadius: 2,
+                                                                )
+                                                              ]
+                                                            : [],
+                                                      ),
+                                                      child: Icon(
+                                                        _isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                                                        color: _isListening ? const Color(0xFFFF0055) : Colors.white70,
+                                                        size: 20,
+                                                      ),
+                                                    ),
+                                                    onPressed: _toggleListening,
                                                   ),
                                                   const SizedBox(width: 6),
 
