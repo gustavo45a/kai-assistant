@@ -16,6 +16,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 // --- MOTOR DE 6 TEMAS VISUALES ---
 enum AppThemeStyle {
@@ -1146,15 +1147,17 @@ class LocalLLMService {
         final role = msg['sender'] == 'user' ? 'user' : 'assistant';
         final text = msg['text'] ?? '';
         if (text.isNotEmpty && !text.startsWith('[ERROR')) {
+          final cleanText = text.replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]'), '');
           promptFormatted.writeln("<|im_start|>$role");
-          promptFormatted.writeln(text);
+          promptFormatted.writeln(cleanText);
           promptFormatted.writeln("<|im_end|>");
         }
       }
     }
 
+    final cleanPrompt = prompt.replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]'), '');
     promptFormatted.writeln("<|im_start|>user");
-    promptFormatted.writeln(prompt);
+    promptFormatted.writeln(cleanPrompt);
     promptFormatted.writeln("<|im_end|>");
     promptFormatted.writeln("<|im_start|>assistant");
 
@@ -1343,6 +1346,7 @@ class _VantablackHomeState extends State<VantablackHome> {
   List<ChatThread> _threads = [];
   String? _activeThreadId;
 
+  bool _isGenerating = false;
   bool _descargandoOta = false;
   bool _descargandoModelo = false;
   double _progresoOta = 0.0;
@@ -1450,9 +1454,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       final status = await Permission.microphone.request();
       if (!status.isGranted) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Se requiere permiso de micrófono para reconocimiento de voz.")),
-          );
+          _mostrarModalErrorWindowsXP("Se requiere permiso de micrófono para reconocimiento de voz.", titulo: "Permiso denegado - Vantablack Hub");
         }
         return;
       }
@@ -1536,9 +1538,7 @@ class _VantablackHomeState extends State<VantablackHome> {
     } catch (e) {
       setState(() => _descargandoOta = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error al descargar OTA: $e")),
-        );
+        _mostrarModalErrorWindowsXP("Error al descargar la actualización OTA: $e");
       }
     }
   }
@@ -1605,9 +1605,7 @@ class _VantablackHomeState extends State<VantablackHome> {
         _descargandoModelo = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error al descargar modelo: $e")),
-        );
+        _mostrarModalErrorWindowsXP("Error al descargar modelo local: $e");
       }
     }
   }
@@ -1668,12 +1666,13 @@ class _VantablackHomeState extends State<VantablackHome> {
 
   Future<void> _procesarMensajeLocal() async {
     final threadActual = _activeThread;
-    if (_chatController.text.trim().isEmpty || threadActual.pensando) return;
+    if (_chatController.text.trim().isEmpty || threadActual.pensando || _isGenerating) return;
 
     final textoUsuario = _chatController.text.trim();
     _chatController.clear();
 
     setState(() {
+      _isGenerating = true;
       threadActual.messages.add({"sender": "user", "text": textoUsuario});
       threadActual.messages.add({"sender": "assistant", "text": "..."});
       threadActual.pensando = true;
@@ -1713,13 +1712,21 @@ class _VantablackHomeState extends State<VantablackHome> {
         });
       }
     } catch (e) {
-      setState(() {
-        threadActual.messages.last = {"sender": "assistant", "text": "[EXCEPCIÓN LOCAL]: $e"};
-      });
+      if (mounted) {
+        setState(() {
+          threadActual.messages.last = {"sender": "assistant", "text": "[EXCEPCIÓN LOCAL]: $e"};
+        });
+      }
     } finally {
-      setState(() {
+      if (mounted) {
+        setState(() {
+          _isGenerating = false;
+          threadActual.pensando = false;
+        });
+      } else {
+        _isGenerating = false;
         threadActual.pensando = false;
-      });
+      }
       await _guardarDatosEnDisco();
     }
   }
@@ -1909,9 +1916,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       final boundary = _repaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("No se pudo obtener el render de la pantalla.")),
-          );
+          _mostrarModalErrorWindowsXP("No se pudo obtener el renderizado de la pantalla actual.");
         }
         return;
       }
@@ -1986,9 +1991,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error al capturar pantalla: $e")),
-        );
+        _mostrarModalErrorWindowsXP("Error al capturar pantalla: $e");
       }
     }
   }
@@ -2003,29 +2006,45 @@ class _VantablackHomeState extends State<VantablackHome> {
 
       if (result != null && result.files.isNotEmpty) {
         final pickedFile = result.files.first;
-        String content = '';
+        String rawBytesString = '';
 
         if (pickedFile.path != null) {
           final file = File(pickedFile.path!);
           final ext = pickedFile.extension?.toLowerCase() ?? '';
+          final bytes = await file.readAsBytes();
           if (ext == 'pdf') {
-            final bytes = await file.readAsBytes();
-            content = _parsePdfBytes(bytes);
+            rawBytesString = _parsePdfBytes(bytes);
           } else {
-            content = await file.readAsString();
+            rawBytesString = utf8.decode(bytes, allowMalformed: true);
           }
         } else if (pickedFile.bytes != null) {
-          content = utf8.decode(pickedFile.bytes!);
+          final ext = pickedFile.extension?.toLowerCase() ?? '';
+          if (ext == 'pdf') {
+            rawBytesString = _parsePdfBytes(pickedFile.bytes!);
+          } else {
+            rawBytesString = utf8.decode(pickedFile.bytes!, allowMalformed: true);
+          }
         }
 
-        if (content.length > 3000) {
-          content = "${content.substring(0, 3000)}\n...[CONTENIDO TRUNCADO POR TAMAÑO DE CONTEXTO]";
+        // Filtrado estricto de texto: elimina caracteres corruptos o no imprimibles
+        String cleanText = rawBytesString.replaceAll(RegExp(r'[^\x20-\x7E\n\áéíóúÁÉÍÓÚñÑüÜ]'), '');
+
+        // Rechazo limpio antes de invocar el motor C++ si el archivo no contiene texto legible
+        if (cleanText.trim().isEmpty) {
+          if (mounted) {
+            _mostrarModalErrorWindowsXP("El documento '${pickedFile.name}' no contiene texto legible o es un archivo binario no compatible.");
+          }
+          return;
+        }
+
+        if (cleanText.length > 3000) {
+          cleanText = "${cleanText.substring(0, 3000)}\n...[CONTENIDO TRUNCADO POR TAMAÑO DE CONTEXTO]";
         }
 
         _chatController.text = "[DOCUMENTO RAG LOCAL: ${pickedFile.name}]\n"
             "Formato: .${pickedFile.extension} | Tamaño: ${pickedFile.size} bytes\n\n"
             "--- CONTENIDO EXTRAÍDO ---\n"
-            "$content\n"
+            "$cleanText\n"
             "--- FIN CONTENIDO ---\n\n"
             "Genera un resumen estructurado con puntos clave de este documento.";
 
@@ -2033,32 +2052,39 @@ class _VantablackHomeState extends State<VantablackHome> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error al leer archivo RAG: $e")),
-        );
+        _mostrarModalErrorWindowsXP("Error al leer archivo RAG: $e");
       }
     }
   }
 
   String _parsePdfBytes(Uint8List bytes) {
-    final raw = latin1.decode(bytes, allowInvalid: true);
-    final regExp = RegExp(r'\(([^)]+)\)');
-    final matches = regExp.allMatches(raw);
-    final sb = StringBuffer();
-    for (var m in matches) {
-      final str = m.group(1);
-      if (str != null && str.trim().length > 1) {
-        final cleaned = str.replaceAll(RegExp(r'\\[0-7]{1,3}'), '').trim();
-        if (cleaned.isNotEmpty && RegExp(r'[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s,.?!]').hasMatch(cleaned)) {
-          sb.write('$cleaned ');
-        }
+    try {
+      final PdfDocument document = PdfDocument(inputBytes: bytes);
+      final String extractedText = PdfTextExtractor(document).extractText();
+      document.dispose();
+      final cleaned = extractedText.replaceAll(RegExp(r'[^\x20-\x7E\n\áéíóúÁÉÍÓÚñÑüÜ]'), '').trim();
+      if (cleaned.isNotEmpty) {
+        return cleaned;
       }
+    } catch (e) {
+      debugPrint("Error al extraer texto de PDF: $e");
     }
-    final extracted = sb.toString().trim();
-    if (extracted.length < 20) {
-      return "Documento PDF parseado (${bytes.length} bytes). Texto estructurado inyectado.";
-    }
-    return extracted;
+    return "";
+  }
+
+  void _mostrarModalErrorWindowsXP(String mensaje, {String titulo = "Error crítico - Vantablack Hub"}) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: WindowsXPErrorDialog(mensaje: mensaje, titulo: titulo),
+        );
+      },
+    );
   }
 
   // TOOL 3: Cajón de Utilidades Dev
@@ -2591,7 +2617,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                                           maxLines: 5,
                                           style: TextStyle(color: theme.textColor, fontSize: 14, height: 1.4),
                                           decoration: InputDecoration(
-                                            hintText: _activeThread.pensando ? "Procesando matriz nativa..." : "Escribe un mensaje...",
+                                            hintText: (_activeThread.pensando || _isGenerating) ? "Procesando matriz nativa..." : "Escribe un mensaje...",
                                             hintStyle: TextStyle(color: theme.subtitleColor, fontSize: 14),
                                             border: InputBorder.none,
                                             isDense: true,
@@ -2679,7 +2705,14 @@ class _VantablackHomeState extends State<VantablackHome> {
                                                 const SizedBox(width: 6),
 
                                                 GestureDetector(
-                                                  onTap: _activeThread.pensando ? null : _procesarMensajeLocal,
+                                                  onTap: (_activeThread.pensando || _isGenerating) ? null : () async {
+                                                    setState(() => _isGenerating = true);
+                                                    try {
+                                                      await _procesarMensajeLocal();
+                                                    } finally {
+                                                      setState(() => _isGenerating = false);
+                                                    }
+                                                  },
                                                   child: Container(
                                                     width: 38,
                                                     height: 38,
@@ -2695,7 +2728,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                                                       ],
                                                     ),
                                                     child: Center(
-                                                      child: _activeThread.pensando
+                                                      child: (_activeThread.pensando || _isGenerating)
                                                           ? const SizedBox(
                                                               width: 16,
                                                               height: 16,
@@ -2838,6 +2871,160 @@ class _VantablackHomeState extends State<VantablackHome> {
           ),
         );
       },
+    );
+  }
+}
+
+// --- WIDGET DE MODAL DE ERROR ESTILO WINDOWS XP / 2000 ---
+class WindowsXPErrorDialog extends StatelessWidget {
+  final String mensaje;
+  final String titulo;
+
+  const WindowsXPErrorDialog({
+    super.key,
+    required this.mensaje,
+    this.titulo = "Error crítico - Vantablack Hub",
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 380,
+      decoration: const BoxDecoration(
+        color: Color(0xFFECE9D8),
+        border: Border(
+          top: BorderSide(color: Colors.white, width: 2),
+          left: BorderSide(color: Colors.white, width: 2),
+          right: BorderSide(color: Color(0xFF404040), width: 2),
+          bottom: BorderSide(color: Color(0xFF404040), width: 2),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black54,
+            blurRadius: 12,
+            offset: Offset(4, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // BARRA DE TÍTULO DE WINDOWS XP
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF0055EA), Color(0xFF0A246A)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline_rounded, color: Colors.white, size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          titulo,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD42A00),
+                      borderRadius: BorderRadius.circular(3),
+                      border: Border.all(color: Colors.white, width: 1),
+                    ),
+                    child: const Center(
+                      child: Icon(Icons.close, color: Colors.white, size: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // CUERPO DEL DIÁLOGO (CÍRCULO ROJO CON 'X' Y TEXTO DESCRIPTIVO)
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFD32F2F),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.close, color: Colors.white, size: 22),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    mensaje,
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // BOTÓN INFERIOR RETRO [ ACEPTAR ]
+          Padding(
+            padding: const EdgeInsets.only(bottom: 14.0, right: 16.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                InkWell(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 6),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFECE9D8),
+                      border: Border(
+                        top: BorderSide(color: Colors.white, width: 2),
+                        left: BorderSide(color: Colors.white, width: 2),
+                        right: BorderSide(color: Color(0xFF404040), width: 2),
+                        bottom: BorderSide(color: Color(0xFF404040), width: 2),
+                      ),
+                    ),
+                    child: const Text(
+                      "Aceptar",
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
