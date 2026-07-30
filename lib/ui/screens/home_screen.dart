@@ -1644,6 +1644,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                                           minLines: 1,
                                           maxLines: 5,
                                           style: TextStyle(color: theme.textColor, fontSize: 14, height: 1.4),
+                                          onSubmitted: (_) => _procesarMensajeLocal(),
                                           decoration: InputDecoration(
                                             hintText: (_activeThread.pensando || _isGenerating) ? "Procesando matriz nativa..." : "Escribe un mensaje...",
                                             hintStyle: TextStyle(color: theme.subtitleColor, fontSize: 14),
@@ -1746,14 +1747,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                                                 const SizedBox(width: 6),
 
                                                 GestureDetector(
-                                                  onTap: (_activeThread.pensando || _isGenerating) ? null : () async {
-                                                    setState(() => _isGenerating = true);
-                                                    try {
-                                                      await _procesarMensajeLocal();
-                                                    } finally {
-                                                      setState(() => _isGenerating = false);
-                                                    }
-                                                  },
+                                                  onTap: (_activeThread.pensando || _isGenerating) ? null : () => _procesarMensajeLocal(),
                                                   child: Container(
                                                     width: 38,
                                                     height: 38,
