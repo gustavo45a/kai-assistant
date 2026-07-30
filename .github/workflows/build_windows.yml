@@ -34,12 +34,13 @@ jobs:
 
     - name: Compress Build Bundle
       run: |
-        Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath docs\vantablack_hub_windows.zip -Force
+        Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath vantablack_hub_windows.zip -Force
+        Copy-Item -Path vantablack_hub_windows.zip -Destination docs\vantablack_hub_windows.zip -Force
 
     - name: Commit and Push Compiled Zip
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add docs/vantablack_hub_windows.zip
-        git commit -m "Auto-build: Generado vantablack_hub_windows.zip v3.0.0" || exit 0
+        git add vantablack_hub_windows.zip docs/vantablack_hub_windows.zip
+        git commit -m "Fix(Release): Generado vantablack_hub_windows.zip en la raíz" || exit 0
         git push
