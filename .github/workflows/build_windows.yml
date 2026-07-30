@@ -31,7 +31,10 @@ jobs:
       run: flutter config --enable-windows-desktop
 
     - name: Build Windows Executable
-      run: flutter build windows --release
+      run: |
+        $env:CXXFLAGS="-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
+        $env:CFLAGS="-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
+        flutter build windows --release
 
     - name: Compress Build Bundle
       run: |
