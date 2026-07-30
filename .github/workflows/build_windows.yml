@@ -11,10 +11,10 @@ jobs:
       contents: write
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Java
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
@@ -38,12 +38,11 @@ jobs:
       run: |
         Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath vantablack_hub_windows.zip -Force
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+    - name: Create Release
+      uses: ncipollo/release-action@v1
       with:
-        files: vantablack_hub_windows.zip
-        tag_name: v3.1.0
-        name: "Vantablack Hub v3.1.0 (Windows & Android)"
-        body: "Release oficial v3.1.0 con ejecutable de Windows y APK de Android."
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        artifacts: "vantablack_hub_windows.zip"
+        tag: "v3.1.0"
+        name: "Vantablack Hub v3.1.0 (Windows)"
+        allowUpdates: true
+        token: ${{ secrets.GITHUB_TOKEN }}
