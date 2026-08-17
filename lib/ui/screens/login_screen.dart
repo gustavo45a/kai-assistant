@@ -78,6 +78,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final theme = AppThemeConfig.getTheme(widget.currentTheme);
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: theme.backgroundColor,
       body: DynamicMulticolorBackground(
         child: Container(

@@ -45,6 +45,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final theme = AppThemeConfig.getTheme(_selectedTheme);
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: theme.backgroundColor,
       body: DynamicMulticolorBackground(
         child: Container(

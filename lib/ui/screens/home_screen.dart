@@ -54,7 +54,17 @@ class _VantablackHomeState extends State<VantablackHome> {
 
   late AppThemeStyle _currentThemeStyle;
   CoreMode _currentMode = CoreMode.normal;
-  List<ChatThread> _threads = [];
+  List<ChatThread> _threads = [
+    ChatThread(
+      id: "instancia_local_default",
+      title: "Matriz LLaMA 3.2 1B (Local)",
+      iaModel: "llama_3_2_1b",
+      modeloInicializado: true,
+      messages: [
+        {"sender": "system", "text": "BIENVENIDO AL NÚCLEO LOCAL VANTABLACK."},
+      ],
+    ),
+  ];
   String? _activeThreadId;
 
   Color? _customAccentColor;
@@ -368,6 +378,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       id: newId,
       title: "Matriz ${modelId.toUpperCase().replaceAll('_', ' ')}",
       iaModel: modelId,
+      modeloInicializado: true,
       messages: [
         {"sender": "system", "text": "INSTANCIA KAI V3 INICIALIZADA."},
       ],
@@ -382,7 +393,7 @@ class _VantablackHomeState extends State<VantablackHome> {
   ChatThread get _activeThread {
     return _threads.firstWhere(
       (t) => t.id == _activeThreadId,
-      orElse: () => _threads.isNotEmpty ? _threads.first : ChatThread(id: '0', title: 'Default', iaModel: 'llama_3_2_1b', messages: []),
+      orElse: () => _threads.isNotEmpty ? _threads.first : ChatThread(id: '0', title: 'Default', iaModel: 'llama_3_2_1b', modeloInicializado: true, messages: []),
     );
   }
 
@@ -476,64 +487,72 @@ class _VantablackHomeState extends State<VantablackHome> {
   // --- PANEL DE HERRAMIENTAS LOCALES (TOOLBOX) ---
   void _mostrarModalToolbox(BuildContext context) {
     final theme = AppThemeConfig.getTheme(_currentThemeStyle);
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) {
-        return Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: theme.surfaceColor,
-            borderRadius: BorderRadius.circular(theme.borderRadius),
-            border: Border.all(color: theme.primaryColor.withValues(alpha: 0.5), width: 1.5),
-            boxShadow: theme.shadows,
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * (isLandscape ? 0.90 : 0.80),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+          child: Container(
+            margin: EdgeInsets.all(isLandscape ? 8 : 16),
+            padding: EdgeInsets.all(isLandscape ? 14 : 20),
+            decoration: BoxDecoration(
+              color: theme.surfaceColor,
+              borderRadius: BorderRadius.circular(theme.borderRadius),
+              border: Border.all(color: theme.primaryColor.withValues(alpha: 0.5), width: 1.5),
+              boxShadow: theme.shadows,
+            ),
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.handyman_rounded, color: theme.primaryColor, size: 22),
-                  const SizedBox(width: 10),
-                  Text(
-                    "PANEL DE HERRAMIENTAS LOCALES (TOOLBOX)",
-                    style: TextStyle(
-                      color: theme.textColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      letterSpacing: 1.0,
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.handyman_rounded, color: theme.primaryColor, size: isLandscape ? 18 : 22),
+                      const SizedBox(width: 10),
+                      Text(
+                        "PANEL DE HERRAMIENTAS LOCALES (TOOLBOX)",
+                        style: TextStyle(
+                          color: theme.textColor,
+                          fontWeight: FontWeight.bold,
+                          fontSize: isLandscape ? 11 : 13,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: Icon(Icons.close_rounded, color: theme.subtitleColor, size: isLandscape ? 18 : 20),
+                        onPressed: () => Navigator.pop(context),
+                      )
+                    ],
                   ),
-                  const Spacer(),
-                  IconButton(
-                    icon: Icon(Icons.close_rounded, color: theme.subtitleColor, size: 20),
-                    onPressed: () => Navigator.pop(context),
-                  )
-                ],
-              ),
-              const SizedBox(height: 16),
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 2.1,
-                children: [
-                  _buildToolTile(
-                    theme: theme,
-                    title: "Tomar Foto Cámara",
-                    subtitle: "Cámara -> Análisis IA",
-                    icon: Icons.photo_camera_rounded,
-                    color: const Color(0xFFFF0055),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _tomarFotoYAnalizarIA(source: ImageSource.camera);
-                    },
-                  ),
+                  SizedBox(height: isLandscape ? 8 : 16),
+                  GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: isLandscape ? 3 : 2,
+                    crossAxisSpacing: isLandscape ? 8 : 12,
+                    mainAxisSpacing: isLandscape ? 8 : 12,
+                    childAspectRatio: isLandscape ? 2.5 : 2.1,
+                    children: [
+                      _buildToolTile(
+                        theme: theme,
+                        title: "Tomar Foto Cámara",
+                        subtitle: "Cámara -> Análisis IA",
+                        icon: Icons.photo_camera_rounded,
+                        color: const Color(0xFFFF0055),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _tomarFotoYAnalizarIA(source: ImageSource.camera);
+                        },
+                      ),
                   _buildToolTile(
                     theme: theme,
                     title: "Captura y Análisis",
@@ -582,10 +601,12 @@ class _VantablackHomeState extends State<VantablackHome> {
               ),
             ],
           ),
-        );
-      },
+        ),
+      ),
     );
-  }
+  },
+);
+}
 
   Widget _buildToolTile({
     required AppThemeData theme,
@@ -954,85 +975,87 @@ class _VantablackHomeState extends State<VantablackHome> {
               ),
               content: SizedBox(
                 width: 500,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: codeController,
-                      maxLines: 7,
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: "Pega aquí tu fragmento de Código o JSON sin formatear...",
-                        hintStyle: TextStyle(color: theme.subtitleColor),
-                        filled: true,
-                        fillColor: theme.backgroundColor,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00B4D8)),
-                          onPressed: () {
-                            try {
-                              final obj = jsonDecode(codeController.text);
-                              final pretty = const JsonEncoder.withIndent('  ').convert(obj);
-                              setDialogState(() {
-                                codeController.text = pretty;
-                                validationResult = "✅ JSON Válido y Formateado Correctamente";
-                              });
-                            } catch (e) {
-                              setDialogState(() {
-                                validationResult = "❌ Error de Sintaxis JSON: $e";
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.data_object_rounded, size: 14, color: Colors.black),
-                          label: const Text("Formatear JSON", style: TextStyle(color: Colors.black, fontSize: 11)),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: codeController,
+                        maxLines: 6,
+                        style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: "Pega aquí tu fragmento de Código o JSON sin formatear...",
+                          hintStyle: TextStyle(color: theme.subtitleColor),
+                          filled: true,
+                          fillColor: theme.backgroundColor,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                         ),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF9D4EDD)),
-                          onPressed: () {
-                            final code = codeController.text;
-                            int openBraces = 0, openParens = 0, openBrackets = 0;
-                            for (var rune in code.runes) {
-                              final char = String.fromCharCode(rune);
-                              if (char == '{') openBraces++;
-                              if (char == '}') openBraces--;
-                              if (char == '(') openParens++;
-                              if (char == ')') openParens--;
-                              if (char == '[') openBrackets++;
-                              if (char == ']') openBrackets--;
-                            }
-                            if (openBraces == 0 && openParens == 0 && openBrackets == 0) {
-                              setDialogState(() {
-                                validationResult = "✅ Símbolos balanceados ({}, (), []). Sintaxis correcta.";
-                              });
-                            } else {
-                              setDialogState(() {
-                                validationResult = "⚠️ Desbalance: Braces: $openBraces, Parens: $openParens, Brackets: $openBrackets";
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.white),
-                          label: const Text("Validar Sintaxis", style: TextStyle(color: Colors.white, fontSize: 11)),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00B4D8)),
+                            onPressed: () {
+                              try {
+                                final obj = jsonDecode(codeController.text);
+                                final pretty = const JsonEncoder.withIndent('  ').convert(obj);
+                                setDialogState(() {
+                                  codeController.text = pretty;
+                                  validationResult = "✅ JSON Válido y Formateado Correctamente";
+                                });
+                              } catch (e) {
+                                setDialogState(() {
+                                  validationResult = "❌ Error de Sintaxis JSON: $e";
+                                });
+                              }
+                            },
+                            icon: const Icon(Icons.data_object_rounded, size: 14, color: Colors.black),
+                            label: const Text("Formatear JSON", style: TextStyle(color: Colors.black, fontSize: 11)),
+                          ),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF9D4EDD)),
+                            onPressed: () {
+                              final code = codeController.text;
+                              int openBraces = 0, openParens = 0, openBrackets = 0;
+                              for (var rune in code.runes) {
+                                final char = String.fromCharCode(rune);
+                                if (char == '{') openBraces++;
+                                if (char == '}') openBraces--;
+                                if (char == '(') openParens++;
+                                if (char == ')') openParens--;
+                                if (char == '[') openBrackets++;
+                                if (char == ']') openBrackets--;
+                              }
+                              if (openBraces == 0 && openParens == 0 && openBrackets == 0) {
+                                setDialogState(() {
+                                  validationResult = "✅ Símbolos balanceados ({}, (), []). Sintaxis correcta.";
+                                });
+                              } else {
+                                setDialogState(() {
+                                  validationResult = "⚠️ Desbalance: Braces: $openBraces, Parens: $openParens, Brackets: $openBrackets";
+                                });
+                              }
+                            },
+                            icon: const Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.white),
+                            label: const Text("Validar Sintaxis", style: TextStyle(color: Colors.white, fontSize: 11)),
+                          ),
+                        ],
+                      ),
+                      if (validationResult.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          validationResult,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: validationResult.startsWith("✅") ? Colors.greenAccent : Colors.orangeAccent,
+                          ),
                         ),
                       ],
-                    ),
-                    if (validationResult.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        validationResult,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: validationResult.startsWith("✅") ? Colors.greenAccent : Colors.orangeAccent,
-                        ),
-                      ),
                     ],
-                  ],
+                  ),
                 ),
               ),
               actions: [
@@ -1168,23 +1191,51 @@ class _VantablackHomeState extends State<VantablackHome> {
               ),
               content: SizedBox(
                 width: 440,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("1. Color de Acento Personalizado", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 13)),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        ...sampleColors.map((color) {
-                          final isSelected = _customAccentColor?.toARGB32() == color.toARGB32();
-                          return InkWell(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("1. Color de Acento Personalizado", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          ...sampleColors.map((color) {
+                            final isSelected = _customAccentColor?.toARGB32() == color.toARGB32();
+                            return InkWell(
+                              onTap: () async {
+                                await AppSettings.saveCustomAccentColor(color.toARGB32());
+                                setDialogState(() {
+                                  _customAccentColor = color;
+                                });
+                                setState(() {});
+                              },
+                              borderRadius: BorderRadius.circular(20),
+                              child: Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isSelected ? Colors.white : Colors.transparent,
+                                    width: 2.5,
+                                  ),
+                                  boxShadow: isSelected
+                                      ? [BoxShadow(color: color.withValues(alpha: 0.8), blurRadius: 10)]
+                                      : [],
+                                ),
+                                child: isSelected ? const Icon(Icons.check, color: Colors.black, size: 20) : null,
+                              ),
+                            );
+                          }),
+                          InkWell(
                             onTap: () async {
-                              await AppSettings.saveCustomAccentColor(color.toARGB32());
+                              await AppSettings.saveCustomAccentColor(null);
                               setDialogState(() {
-                                _customAccentColor = color;
+                                _customAccentColor = null;
                               });
                               setState(() {});
                             },
@@ -1193,98 +1244,72 @@ class _VantablackHomeState extends State<VantablackHome> {
                               width: 38,
                               height: 38,
                               decoration: BoxDecoration(
-                                color: color,
+                                color: theme.cardColor,
                                 shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: isSelected ? Colors.white : Colors.transparent,
-                                  width: 2.5,
-                                ),
-                                boxShadow: isSelected
-                                    ? [BoxShadow(color: color.withValues(alpha: 0.8), blurRadius: 10)]
-                                    : [],
+                                border: Border.all(color: theme.borderColor),
                               ),
-                              child: isSelected ? const Icon(Icons.check, color: Colors.black, size: 20) : null,
+                              child: const Icon(Icons.refresh_rounded, color: Colors.white70, size: 18),
                             ),
-                          );
-                        }),
-                        InkWell(
-                          onTap: () async {
-                            await AppSettings.saveCustomAccentColor(null);
-                            setDialogState(() {
-                              _customAccentColor = null;
-                            });
-                            setState(() {});
-                          },
-                          borderRadius: BorderRadius.circular(20),
-                          child: Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: theme.cardColor,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: theme.borderColor),
-                            ),
-                            child: const Icon(Icons.refresh_rounded, color: Colors.white70, size: 18),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    Text("2. Imagen de Fondo Personalizada", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 13)),
-                    const SizedBox(height: 10),
-                    if (_customBgImagePath != null && _customBgImagePath!.isNotEmpty) ...[
-                      Row(
-                        children: [
-                          const Icon(Icons.image_rounded, color: Colors.greenAccent, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _customBgImagePath!.split('/').last,
-                              style: TextStyle(color: theme.subtitleColor, fontSize: 11),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close_rounded, color: Colors.redAccent, size: 18),
-                            onPressed: () async {
-                              await AppSettings.saveCustomBgImagePath(null);
-                              setDialogState(() {
-                                _customBgImagePath = null;
-                              });
-                              setState(() {});
-                            },
                           ),
                         ],
                       ),
+                      const SizedBox(height: 24),
+                      Text("2. Imagen de Fondo Personalizada", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 13)),
                       const SizedBox(height: 10),
-                    ],
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.cardColor,
-                        foregroundColor: theme.textColor,
-                        minimumSize: const Size(double.infinity, 44),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: BorderSide(color: theme.borderColor),
+                      if (_customBgImagePath != null && _customBgImagePath!.isNotEmpty) ...[
+                        Row(
+                          children: [
+                            const Icon(Icons.image_rounded, color: Colors.greenAccent, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _customBgImagePath!.split('/').last,
+                                style: TextStyle(color: theme.subtitleColor, fontSize: 11),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded, color: Colors.redAccent, size: 18),
+                              onPressed: () async {
+                                await AppSettings.saveCustomBgImagePath(null);
+                                setDialogState(() {
+                                  _customBgImagePath = null;
+                                });
+                                setState(() {});
+                              },
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: 10),
+                      ],
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: theme.cardColor,
+                          foregroundColor: theme.textColor,
+                          minimumSize: const Size(double.infinity, 44),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: BorderSide(color: theme.borderColor),
+                          ),
+                        ),
+                        onPressed: () async {
+                          final result = await FilePicker.platform.pickFiles(
+                            type: FileType.image,
+                          );
+                          if (result != null && result.files.isNotEmpty && result.files.first.path != null) {
+                            final path = result.files.first.path!;
+                            await AppSettings.saveCustomBgImagePath(path);
+                            setDialogState(() {
+                              _customBgImagePath = path;
+                            });
+                            setState(() {});
+                          }
+                        },
+                        icon: Icon(Icons.upload_file_rounded, size: 18, color: _getModeAccentColor(theme)),
+                        label: const Text("Cargar Imagen de Fondo (.png/.jpg)", style: TextStyle(fontSize: 12)),
                       ),
-                      onPressed: () async {
-                        final result = await FilePicker.platform.pickFiles(
-                          type: FileType.image,
-                        );
-                        if (result != null && result.files.isNotEmpty && result.files.first.path != null) {
-                          final path = result.files.first.path!;
-                          await AppSettings.saveCustomBgImagePath(path);
-                          setDialogState(() {
-                            _customBgImagePath = path;
-                          });
-                          setState(() {});
-                        }
-                      },
-                      icon: Icon(Icons.upload_file_rounded, size: 18, color: _getModeAccentColor(theme)),
-                      label: const Text("Cargar Imagen de Fondo (.png/.jpg)", style: TextStyle(fontSize: 12)),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -1305,9 +1330,22 @@ class _VantablackHomeState extends State<VantablackHome> {
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeConfig.getTheme(_currentThemeStyle);
+    final mediaQuery = MediaQuery.of(context);
+    final isLandscapeScreen = mediaQuery.orientation == Orientation.landscape;
+    final isWideScreen = mediaQuery.size.width >= 600;
+    final shouldShowDrawer = !isLandscapeScreen && !isWideScreen;
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: theme.backgroundColor,
+      drawer: shouldShowDrawer
+          ? Drawer(
+              backgroundColor: theme.surfaceColor,
+              child: SafeArea(
+                child: _buildSidebarContent(theme, isLandscape: false, isDrawer: true),
+              ),
+            )
+          : null,
       body: DynamicMulticolorBackground(
         customAccentColor: _customAccentColor,
         customBgImagePath: _customBgImagePath,
@@ -1315,483 +1353,575 @@ class _VantablackHomeState extends State<VantablackHome> {
           key: _repaintBoundaryKey,
           child: Container(
             decoration: BoxDecoration(gradient: theme.backgroundGradient),
-          child: Row(
-            children: [
-              // BARRA LATERAL NATIVA
-              Container(
-                width: 270,
-                decoration: BoxDecoration(
-                  color: theme.surfaceColor,
-                  border: Border(right: BorderSide(color: theme.borderColor, width: 0.8)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 36),
-                    
-                    Center(
-                      child: GestureDetector(
-                        onTap: _ejecutarActualizacionOTA,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 400),
-                          width: 130, height: 130, 
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(theme.borderRadius),
-                            boxShadow: theme.shadows,
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(theme.borderRadius),
-                            child: Image.asset(
-                              'assets/logo.png',
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  color: theme.cardColor,
-                                  child: Icon(
-                                    Icons.shield_rounded,
-                                    color: theme.primaryColor,
-                                    size: 36,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 15),
+            child: SafeArea(
+              child: OrientationBuilder(
+                builder: (context, orientation) {
+                  final isLandscape = orientation == Orientation.landscape;
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      final useTwoColumns = isLandscape || constraints.maxWidth >= 600;
 
-                    _buildHardwareTelemetryCard(theme),
-                    
-                    _buildContinuousLearningCard(theme),
-                    
-                    const SizedBox(height: 10),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _buildLiquidGlassButton(
-                            theme: theme,
-                            title: "Modo Normal",
-                            icon: Icons.bolt_rounded,
-                            isSelected: _currentMode == CoreMode.normal,
-                            activeColor: theme.primaryColor,
-                            onTap: () => setState(() => _currentMode = CoreMode.normal),
-                          ),
-                          _buildLiquidGlassButton(
-                            theme: theme,
-                            title: "Estudiante",
-                            icon: Icons.menu_book_rounded,
-                            isSelected: _currentMode == CoreMode.estudiante,
-                            activeColor: theme.secondaryColor,
-                            onTap: () => setState(() => _currentMode = CoreMode.estudiante),
-                          ),
-                        ],
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 16),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.cardColor,
-                          foregroundColor: theme.textColor,
-                          minimumSize: const Size(double.infinity, 44),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(theme.borderRadius),
-                            side: BorderSide(color: theme.borderColor),
-                          ),
-                        ),
-                        onPressed: _mostrarSelectorNuevoChat,
-                        icon: Icon(Icons.add_rounded, size: 18, color: theme.primaryColor),
-                        label: const Text("Nueva Instancia", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Text("MATRICES LOCALES ACTIVAS", style: TextStyle(fontSize: 9, color: theme.subtitleColor, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: _threads.length,
-                        itemBuilder: (context, index) {
-                          final thread = _threads[index];
-                          final isSelected = thread.id == _activeThreadId;
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                            child: ListTile(
-                              dense: true,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              selected: isSelected,
-                              selectedTileColor: theme.cardColor,
-                              leading: Icon(Icons.code_rounded, size: 16, color: isSelected ? theme.primaryColor : theme.subtitleColor),
-                              title: Text(
-                                thread.title,
-                                style: TextStyle(color: isSelected ? theme.textColor : theme.subtitleColor, fontSize: 12.5),
+                      if (useTwoColumns) {
+                        final sidebarWidth = isLandscape
+                            ? (constraints.maxWidth * 0.28).clamp(230.0, 270.0)
+                            : 270.0;
+
+                        return Row(
+                          children: [
+                            // BARRA LATERAL NATIVA (SCROLLABLE)
+                            Container(
+                              width: sidebarWidth,
+                              decoration: BoxDecoration(
+                                color: theme.surfaceColor,
+                                border: Border(right: BorderSide(color: theme.borderColor, width: 0.8)),
                               ),
-                              onTap: () {
-                                setState(() {
-                                  _activeThreadId = thread.id;
-                                });
-                              },
+                              child: _buildSidebarContent(theme, isLandscape: isLandscape),
                             ),
-                          );
-                        },
-                      ),
-                    ),
+                            // NÚCLEO DEL CHAT (EXPANDED LISTVIEW CON MÁXIMA PRIORIDAD)
+                            Expanded(
+                              child: _buildChatArea(
+                                theme,
+                                isLandscape: isLandscape,
+                                showMenuButton: false,
+                                constraints: constraints,
+                              ),
+                            ),
+                          ],
+                        );
+                      }
 
-                    if (_descargandoOta)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text("Descargando actualización...", style: TextStyle(fontSize: 9, color: Colors.amber)),
-                            const SizedBox(height: 4),
-                            LinearProgressIndicator(value: _progresoOta, color: const Color(0xFFFF9500), minHeight: 2),
-                          ],
+                      // MODO RETRATO EN PANTALLA ESTRECHA (DRAWER DISPONIBLE)
+                      return _buildChatArea(
+                        theme,
+                        isLandscape: false,
+                        showMenuButton: true,
+                        constraints: constraints,
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSidebarContent(AppThemeData theme, {required bool isLandscape, bool isDrawer = false}) {
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: isLandscape ? 12 : 28),
+          
+          Center(
+            child: GestureDetector(
+              onTap: _ejecutarActualizacionOTA,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 400),
+                width: isLandscape ? 64 : 110,
+                height: isLandscape ? 64 : 110, 
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(theme.borderRadius),
+                  boxShadow: theme.shadows,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(theme.borderRadius),
+                  child: Image.asset(
+                    'assets/logo.png',
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        color: theme.cardColor,
+                        child: Icon(
+                          Icons.shield_rounded,
+                          color: theme.primaryColor,
+                          size: isLandscape ? 28 : 36,
                         ),
-                      ),
-                    if (_descargandoModelo)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text("Descargando pesos de IA...", style: TextStyle(fontSize: 9, color: theme.primaryColor)),
-                            const SizedBox(height: 4),
-                            LinearProgressIndicator(value: _progresoModelo, color: theme.primaryColor, minHeight: 2),
-                          ],
-                        ),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text("User: ${widget.username} | V$_versionHub", style: TextStyle(fontSize: 9, color: theme.subtitleColor, fontFamily: 'monospace')),
-                    )
-                  ],
+                      );
+                    },
+                  ),
                 ),
               ),
-              
-              // NÚCLEO DEL CHAT
-              Expanded(
-                child: Column(
-                  children: [
-                    // BARRA SUPERIOR CON SELECCIONADOR DE TEMA
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                      decoration: BoxDecoration(
-                        color: theme.surfaceColor,
-                        border: Border(bottom: BorderSide(color: theme.borderColor, width: 0.8)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            _activeThread.title,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: theme.textColor,
-                            ),
-                          ),
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: theme.primaryColor.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: theme.primaryColor.withValues(alpha: 0.25)),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.memory_rounded, size: 12, color: theme.primaryColor),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      "Modelo: ${_activeThread.iaModel}",
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: theme.primaryColor,
-                                        fontWeight: FontWeight.bold,
-                                        fontFamily: 'monospace',
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              IconButton(
-                                 icon: Icon(Icons.wallpaper_rounded, color: _getModeAccentColor(theme), size: 20),
-                                 tooltip: "Personalizar Fondo y Colores",
-                                 onPressed: _mostrarModalPersonalizarFondoColores,
-                               ),
-                               const SizedBox(width: 4),
-                              IconButton(
-                                icon: Icon(Icons.palette_rounded, color: theme.primaryColor, size: 20),
-                                tooltip: "Cambiar Tema Visual",
-                                onPressed: () {
-                                  mostrarSelectorTemasModal(
-                                    context,
-                                    _currentThemeStyle,
-                                    (newTheme) {
-                                      setState(() {
-                                        _currentThemeStyle = newTheme;
-                                      });
-                                      widget.onThemeChanged(newTheme);
-                                    },
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.all(24),
-                        itemCount: _activeThread.messages.length,
-                        itemBuilder: (context, index) {
-                          final msg = _activeThread.messages[index];
-                          final sender = msg["sender"];
-                          
-                          Alignment align = Alignment.centerLeft;
-                          BoxDecoration decoration = BoxDecoration(
-                            color: theme.surfaceColor,
-                            borderRadius: BorderRadius.circular(theme.borderRadius),
-                            border: Border.all(color: theme.borderColor),
-                            boxShadow: theme.shadows,
-                          );
-                          TextStyle textStyle = TextStyle(color: theme.textColor, fontSize: 14, height: 1.4);
+            ),
+          ),
+          
+          SizedBox(height: isLandscape ? 8 : 14),
 
-                          if (sender == "user") {
-                            align = Alignment.centerRight;
-                            decoration = BoxDecoration(
-                              color: theme.cardColor,
-                              borderRadius: BorderRadius.circular(theme.borderRadius),
-                              border: Border.all(color: theme.primaryColor.withValues(alpha: 0.4)),
-                            );
-                          } else if (sender == "system") {
-                            align = Alignment.center;
-                            decoration = BoxDecoration(
-                              color: theme.primaryColor.withValues(alpha: 0.05),
-                              borderRadius: BorderRadius.circular(8),
-                            );
-                            textStyle = TextStyle(color: theme.primaryColor, fontSize: 11, fontFamily: 'monospace');
-                          }
-
-                          return Align(
-                            alignment: align,
-                            child: Container(
-                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.65),
-                              margin: const EdgeInsets.symmetric(vertical: 4),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              decoration: decoration,
-                              child: Text(msg["text"]!, style: textStyle),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      child: _descargandoModelo 
-                          ? Column(
-                              children: [
-                                LinearProgressIndicator(value: _progresoModelo, color: theme.primaryColor),
-                                const SizedBox(height: 8),
-                                Text(
-                                  "Descargando modelo: ${(_progresoModelo * 100).toStringAsFixed(0)}% completado",
-                                  style: TextStyle(fontSize: 12, color: theme.subtitleColor),
-                                ),
-                              ],
-                            )
-                          : !_activeThread.modeloInicializado
-                              ? ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFFFF9500),
-                                    foregroundColor: Colors.black,
-                                    minimumSize: const Size(double.infinity, 48),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                  ),
-                                  onPressed: () => _descargarModeloLlmNativamente(_activeThread),
-                                  icon: const Icon(Icons.download_rounded),
-                                  label: Text("Descargar Modelo Nativamente (${_activeThread.iaModel})"),
-                                )
-                              : Container(
-                                  margin: const EdgeInsets.only(bottom: 8, left: 6, right: 6),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: theme.surfaceColor,
-                                      borderRadius: BorderRadius.circular(theme.borderRadius),
-                                      border: Border.all(color: theme.borderColor, width: 1.2),
-                                      boxShadow: theme.shadows,
-                                    ),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        TextField(
-                                          controller: _chatController,
-                                          minLines: 1,
-                                          maxLines: 5,
-                                          style: TextStyle(color: theme.textColor, fontSize: 14, height: 1.4),
-                                          onSubmitted: (_) => _procesarMensajeLocal(),
-                                          decoration: InputDecoration(
-                                            hintText: (_activeThread.pensando || _isGenerating) ? "Procesando matriz nativa..." : "Escribe un mensaje...",
-                                            hintStyle: TextStyle(color: theme.subtitleColor, fontSize: 14),
-                                            border: InputBorder.none,
-                                            isDense: true,
-                                            contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 10),
-
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            // BOTÓN TOOLBOX (MALETÍN / HERRAMIENTAS)
-                                            InkWell(
-                                              borderRadius: BorderRadius.circular(20),
-                                              onTap: () => _mostrarModalToolbox(context),
-                                              child: Container(
-                                                padding: const EdgeInsets.all(8),
-                                                decoration: BoxDecoration(
-                                                  color: theme.primaryColor.withValues(alpha: 0.15),
-                                                  shape: BoxShape.circle,
-                                                  border: Border.all(color: theme.primaryColor.withValues(alpha: 0.3), width: 1),
-                                                ),
-                                                child: Icon(Icons.work_rounded, color: theme.primaryColor, size: 20),
-                                              ),
-                                            ),
-
-                                            Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                GestureDetector(
-                                                  onTap: () {
-                                                    setState(() {
-                                                      _currentMode = _currentMode == CoreMode.normal
-                                                          ? CoreMode.estudiante
-                                                          : CoreMode.normal;
-                                                    });
-                                                  },
-                                                  child: Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                                    decoration: BoxDecoration(
-                                                      color: _currentMode == CoreMode.estudiante
-                                                          ? theme.secondaryColor.withValues(alpha: 0.25)
-                                                          : theme.primaryColor.withValues(alpha: 0.2),
-                                                      borderRadius: BorderRadius.circular(16),
-                                                      border: Border.all(
-                                                        color: _currentMode == CoreMode.estudiante
-                                                            ? theme.secondaryColor
-                                                            : theme.primaryColor,
-                                                        width: 1.0,
-                                                      ),
-                                                    ),
-                                                    child: Row(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                          _currentMode == CoreMode.estudiante ? Icons.school_rounded : Icons.bolt_rounded,
-                                                          size: 13,
-                                                          color: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
-                                                        ),
-                                                        const SizedBox(width: 4),
-                                                        Text(
-                                                          _currentMode == CoreMode.estudiante ? "Estudiante" : "Local",
-                                                          style: TextStyle(
-                                                            fontSize: 11,
-                                                            fontWeight: FontWeight.bold,
-                                                            color: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-
-                                                IconButton(
-                                                  padding: EdgeInsets.zero,
-                                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                                  icon: Icon(
-                                                    Icons.photo_camera_rounded,
-                                                    color: _getModeAccentColor(theme),
-                                                    size: 20,
-                                                  ),
-                                                  tooltip: "Tomar Foto con Cámara",
-                                                  onPressed: () => _tomarFotoYAnalizarIA(source: ImageSource.camera),
-                                                ),
-                                                const SizedBox(width: 4),
-
-                                                IconButton(
-                                                  padding: EdgeInsets.zero,
-                                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                                  icon: Icon(
-                                                    _isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
-                                                    color: _isListening ? const Color(0xFFFF0055) : theme.subtitleColor,
-                                                    size: 20,
-                                                  ),
-                                                  onPressed: _toggleListening,
-                                                ),
-                                                const SizedBox(width: 6),
-
-                                                GestureDetector(
-                                                  onTap: (_activeThread.pensando || _isGenerating) ? null : () => _procesarMensajeLocal(),
-                                                  child: Container(
-                                                    width: 38,
-                                                    height: 38,
-                                                    decoration: BoxDecoration(
-                                                      shape: BoxShape.circle,
-                                                      color: _getModeAccentColor(theme),
-                                                      boxShadow: [
-                                                        BoxShadow(
-                                                          color: _getModeAccentColor(theme).withValues(alpha: 0.5),
-                                                          blurRadius: 8,
-                                                          offset: const Offset(0, 2),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    child: Center(
-                                                      child: (_activeThread.pensando || _isGenerating)
-                                                          ? const SizedBox(
-                                                              width: 16,
-                                                              height: 16,
-                                                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                                                            )
-                                                          : Icon(_getModeSendIcon(), color: Colors.black, size: 20),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                    ),
-                  ],
+          _buildHardwareTelemetryCard(theme, isLandscape: isLandscape),
+          
+          _buildContinuousLearningCard(theme, isLandscape: isLandscape),
+          
+          SizedBox(height: isLandscape ? 6 : 10),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: isLandscape ? 10 : 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildLiquidGlassButton(
+                    theme: theme,
+                    title: "Modo Normal",
+                    icon: Icons.bolt_rounded,
+                    isSelected: _currentMode == CoreMode.normal,
+                    activeColor: theme.primaryColor,
+                    isLandscape: isLandscape,
+                    onTap: () => setState(() => _currentMode = CoreMode.normal),
+                  ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildLiquidGlassButton(
+                    theme: theme,
+                    title: "Estudiante",
+                    icon: Icons.menu_book_rounded,
+                    isSelected: _currentMode == CoreMode.estudiante,
+                    activeColor: theme.secondaryColor,
+                    isLandscape: isLandscape,
+                    onTap: () => setState(() => _currentMode = CoreMode.estudiante),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          SizedBox(height: isLandscape ? 8 : 14),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: isLandscape ? 10 : 16),
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.cardColor,
+                foregroundColor: theme.textColor,
+                minimumSize: Size(double.infinity, isLandscape ? 36 : 44),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(theme.borderRadius),
+                  side: BorderSide(color: theme.borderColor),
+                ),
+              ),
+              onPressed: () {
+                if (isDrawer) Navigator.of(context).pop();
+                _mostrarSelectorNuevoChat();
+              },
+              icon: Icon(Icons.add_rounded, size: 18, color: theme.primaryColor),
+              label: const Text("Nueva Instancia", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          SizedBox(height: isLandscape ? 8 : 14),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: isLandscape ? 14 : 20),
+            child: Text("MATRICES LOCALES ACTIVAS", style: TextStyle(fontSize: 9, color: theme.subtitleColor, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(height: 6),
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _threads.length,
+            itemBuilder: (context, index) {
+              final thread = _threads[index];
+              final isSelected = thread.id == _activeThreadId;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  child: ListTile(
+                    dense: true,
+                    visualDensity: isLandscape ? const VisualDensity(horizontal: 0, vertical: -2) : VisualDensity.compact,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    selected: isSelected,
+                    selectedTileColor: theme.cardColor,
+                    leading: Icon(Icons.code_rounded, size: 16, color: isSelected ? theme.primaryColor : theme.subtitleColor),
+                    title: Text(
+                      thread.title,
+                      style: TextStyle(color: isSelected ? theme.textColor : theme.subtitleColor, fontSize: isLandscape ? 11.5 : 12.5),
+                    ),
+                    onTap: () {
+                      setState(() {
+                        _activeThreadId = thread.id;
+                      });
+                      if (isDrawer) Navigator.of(context).pop();
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
+
+          if (_descargandoOta)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("Descargando actualización...", style: TextStyle(fontSize: 9, color: Colors.amber)),
+                  const SizedBox(height: 4),
+                  LinearProgressIndicator(value: _progresoOta, color: const Color(0xFFFF9500), minHeight: 2),
+                ],
+              ),
+            ),
+          if (_descargandoModelo)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Descargando pesos de IA...", style: TextStyle(fontSize: 9, color: theme.primaryColor)),
+                  const SizedBox(height: 4),
+                  LinearProgressIndicator(value: _progresoModelo, color: theme.primaryColor, minHeight: 2),
+                ],
+              ),
+            ),
+          Padding(
+            padding: EdgeInsets.all(isLandscape ? 10 : 16),
+            child: Text("User: ${widget.username} | V$_versionHub", style: TextStyle(fontSize: 9, color: theme.subtitleColor, fontFamily: 'monospace')),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatArea(
+    AppThemeData theme, {
+    required bool isLandscape,
+    required bool showMenuButton,
+    required BoxConstraints constraints,
+  }) {
+    return Column(
+      children: [
+        // BARRA SUPERIOR CON SELECCIONADOR DE TEMA
+        Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: isLandscape ? 12 : 16,
+            vertical: isLandscape ? 6 : 10,
+          ),
+          decoration: BoxDecoration(
+            color: theme.surfaceColor,
+            border: Border(bottom: BorderSide(color: theme.borderColor, width: 0.8)),
+          ),
+          child: Row(
+            children: [
+              if (showMenuButton) ...[
+                Builder(
+                  builder: (scaffoldContext) => IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    icon: Icon(Icons.menu_rounded, color: theme.primaryColor, size: 20),
+                    tooltip: "Abrir Menú Lateral",
+                    onPressed: () => Scaffold.of(scaffoldContext).openDrawer(),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+              Expanded(
+                child: Text(
+                  _activeThread.title,
+                  style: TextStyle(
+                    fontSize: isLandscape ? 13.5 : 14.5,
+                    fontWeight: FontWeight.bold,
+                    color: theme.textColor,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: isLandscape ? 6 : 8, vertical: isLandscape ? 2 : 4),
+                    decoration: BoxDecoration(
+                      color: theme.primaryColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: theme.primaryColor.withValues(alpha: 0.25)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.memory_rounded, size: 11, color: theme.primaryColor),
+                        const SizedBox(width: 4),
+                        Text(
+                          _activeThread.iaModel,
+                          style: TextStyle(
+                            fontSize: isLandscape ? 9.5 : 10.5,
+                            color: theme.primaryColor,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: BoxConstraints(minWidth: isLandscape ? 28 : 32, minHeight: isLandscape ? 28 : 32),
+                    icon: Icon(Icons.wallpaper_rounded, color: _getModeAccentColor(theme), size: isLandscape ? 17 : 19),
+                    tooltip: "Personalizar Fondo y Colores",
+                    onPressed: _mostrarModalPersonalizarFondoColores,
+                  ),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: BoxConstraints(minWidth: isLandscape ? 28 : 32, minHeight: isLandscape ? 28 : 32),
+                    icon: Icon(Icons.palette_rounded, color: theme.primaryColor, size: isLandscape ? 17 : 19),
+                    tooltip: "Cambiar Tema Visual",
+                    onPressed: () {
+                      mostrarSelectorTemasModal(
+                        context,
+                        _currentThemeStyle,
+                        (newTheme) {
+                          setState(() {
+                            _currentThemeStyle = newTheme;
+                          });
+                          widget.onThemeChanged(newTheme);
+                        },
+                      );
+                    },
+                  ),
+                ],
               ),
             ],
           ),
         ),
-      ),
-    ),
-  );
-}
+        
+        // ÁREA DE MENSAJES (EXPANDED LISTVIEW CON MÁXIMA PRIORIDAD)
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: EdgeInsets.all(isLandscape ? 12 : 20),
+            itemCount: _activeThread.messages.length,
+            itemBuilder: (context, index) {
+              final msg = _activeThread.messages[index];
+              final sender = msg["sender"];
+              
+              Alignment align = Alignment.centerLeft;
+              BoxDecoration decoration = BoxDecoration(
+                color: theme.surfaceColor,
+                borderRadius: BorderRadius.circular(theme.borderRadius),
+                border: Border.all(color: theme.borderColor),
+                boxShadow: theme.shadows,
+              );
+              TextStyle textStyle = TextStyle(color: theme.textColor, fontSize: isLandscape ? 13 : 14, height: 1.35);
+
+              if (sender == "user") {
+                align = Alignment.centerRight;
+                decoration = BoxDecoration(
+                  color: theme.cardColor,
+                  borderRadius: BorderRadius.circular(theme.borderRadius),
+                  border: Border.all(color: theme.primaryColor.withValues(alpha: 0.4)),
+                );
+              } else if (sender == "system") {
+                align = Alignment.center;
+                decoration = BoxDecoration(
+                  color: theme.primaryColor.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(8),
+                );
+                textStyle = TextStyle(color: theme.primaryColor, fontSize: 11, fontFamily: 'monospace');
+              }
+
+              return Align(
+                alignment: align,
+                child: Container(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth * (isLandscape ? 0.60 : 0.78)),
+                  margin: EdgeInsets.symmetric(vertical: isLandscape ? 3 : 4),
+                  padding: EdgeInsets.symmetric(horizontal: isLandscape ? 12 : 16, vertical: isLandscape ? 8 : 12),
+                  decoration: decoration,
+                  child: Text(msg["text"]!, style: textStyle),
+                ),
+              );
+            },
+          ),
+        ),
+        
+        // BARRA INFERIOR DE ENTRADA RESPONSIVA (SIN ALTURAS FIJAS QUE DESBORDEN)
+        Container(
+          padding: EdgeInsets.symmetric(horizontal: isLandscape ? 10 : 14, vertical: isLandscape ? 4 : 8),
+          child: _descargandoModelo 
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    LinearProgressIndicator(value: _progresoModelo, color: theme.primaryColor),
+                    SizedBox(height: isLandscape ? 4 : 8),
+                    Text(
+                      "Descargando modelo: ${(_progresoModelo * 100).toStringAsFixed(0)}% completado",
+                      style: TextStyle(fontSize: isLandscape ? 11 : 12, color: theme.subtitleColor),
+                    ),
+                  ],
+                )
+              : !_activeThread.modeloInicializado
+                  ? ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF9500),
+                        foregroundColor: Colors.black,
+                        minimumSize: Size(double.infinity, isLandscape ? 38 : 48),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: () => _descargarModeloLlmNativamente(_activeThread),
+                      icon: Icon(Icons.download_rounded, size: isLandscape ? 18 : 22),
+                      label: Text(
+                        "Descargar Modelo Nativamente (${_activeThread.iaModel})",
+                        style: TextStyle(fontSize: isLandscape ? 12 : 14),
+                      ),
+                    )
+                  : Container(
+                      margin: EdgeInsets.only(bottom: isLandscape ? 4 : 8, left: 6, right: 6),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: isLandscape ? 12 : 16, vertical: isLandscape ? 6 : 10),
+                        decoration: BoxDecoration(
+                          color: theme.surfaceColor,
+                          borderRadius: BorderRadius.circular(theme.borderRadius),
+                          border: Border.all(color: theme.borderColor, width: 1.2),
+                          boxShadow: theme.shadows,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextField(
+                              controller: _chatController,
+                              minLines: 1,
+                              maxLines: isLandscape ? 3 : 5,
+                              style: TextStyle(color: theme.textColor, fontSize: isLandscape ? 13 : 14, height: 1.35),
+                              onSubmitted: (_) => _procesarMensajeLocal(),
+                              decoration: InputDecoration(
+                                hintText: (_activeThread.pensando || _isGenerating) ? "Procesando matriz nativa..." : "Escribe un mensaje...",
+                                hintStyle: TextStyle(color: theme.subtitleColor, fontSize: isLandscape ? 13 : 14),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(vertical: isLandscape ? 2 : 4),
+                              ),
+                            ),
+                            SizedBox(height: isLandscape ? 6 : 10),
+
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                // BOTÓN TOOLBOX (MALETÍN / HERRAMIENTAS)
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () => _mostrarModalToolbox(context),
+                                  child: Container(
+                                    padding: EdgeInsets.all(isLandscape ? 6 : 8),
+                                    decoration: BoxDecoration(
+                                      color: theme.primaryColor.withValues(alpha: 0.15),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: theme.primaryColor.withValues(alpha: 0.3), width: 1),
+                                    ),
+                                    child: Icon(Icons.work_rounded, color: theme.primaryColor, size: isLandscape ? 17 : 20),
+                                  ),
+                                ),
+
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          _currentMode = _currentMode == CoreMode.normal
+                                              ? CoreMode.estudiante
+                                              : CoreMode.normal;
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: EdgeInsets.symmetric(horizontal: isLandscape ? 8 : 10, vertical: isLandscape ? 3 : 5),
+                                        decoration: BoxDecoration(
+                                          color: _currentMode == CoreMode.estudiante
+                                              ? theme.secondaryColor.withValues(alpha: 0.25)
+                                              : theme.primaryColor.withValues(alpha: 0.2),
+                                          borderRadius: BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: _currentMode == CoreMode.estudiante
+                                                ? theme.secondaryColor
+                                                : theme.primaryColor,
+                                            width: 1.0,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              _currentMode == CoreMode.estudiante ? Icons.school_rounded : Icons.bolt_rounded,
+                                              size: isLandscape ? 11 : 13,
+                                              color: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              _currentMode == CoreMode.estudiante ? "Estudiante" : "Local",
+                                              style: TextStyle(
+                                                fontSize: isLandscape ? 10 : 11,
+                                                fontWeight: FontWeight.bold,
+                                                color: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: isLandscape ? 6 : 8),
+
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: BoxConstraints(minWidth: isLandscape ? 28 : 32, minHeight: isLandscape ? 28 : 32),
+                                      icon: Icon(
+                                        Icons.photo_camera_rounded,
+                                        color: _getModeAccentColor(theme),
+                                        size: isLandscape ? 18 : 20,
+                                      ),
+                                      tooltip: "Tomar Foto con Cámara",
+                                      onPressed: () => _tomarFotoYAnalizarIA(source: ImageSource.camera),
+                                    ),
+                                    const SizedBox(width: 2),
+
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: BoxConstraints(minWidth: isLandscape ? 28 : 32, minHeight: isLandscape ? 28 : 32),
+                                      icon: Icon(
+                                        _isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                                        color: _isListening ? const Color(0xFFFF0055) : theme.subtitleColor,
+                                        size: isLandscape ? 18 : 20,
+                                      ),
+                                      onPressed: _toggleListening,
+                                    ),
+                                    SizedBox(width: isLandscape ? 4 : 6),
+
+                                    GestureDetector(
+                                      onTap: (_activeThread.pensando || _isGenerating) ? null : () => _procesarMensajeLocal(),
+                                      child: Container(
+                                        width: isLandscape ? 34 : 38,
+                                        height: isLandscape ? 34 : 38,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: _getModeAccentColor(theme),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: _getModeAccentColor(theme).withValues(alpha: 0.5),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Center(
+                                          child: (_activeThread.pensando || _isGenerating)
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                                                )
+                                              : Icon(_getModeSendIcon(), color: Colors.black, size: isLandscape ? 17 : 20),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildLiquidGlassButton({
     required AppThemeData theme,
@@ -1800,26 +1930,33 @@ class _VantablackHomeState extends State<VantablackHome> {
     required bool isSelected,
     required Color activeColor,
     required VoidCallback onTap,
+    bool isLandscape = false,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: EdgeInsets.symmetric(horizontal: isLandscape ? 4 : 8, vertical: isLandscape ? 4 : 6),
         decoration: BoxDecoration(
           color: isSelected ? activeColor.withValues(alpha: 0.2) : theme.cardColor,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: isSelected ? activeColor : theme.borderColor),
         ),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: isSelected ? activeColor : theme.subtitleColor),
+            Icon(icon, size: isLandscape ? 12 : 14, color: isSelected ? activeColor : theme.subtitleColor),
             const SizedBox(width: 4),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? activeColor : theme.subtitleColor,
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: isLandscape ? 9.5 : 11,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  color: isSelected ? activeColor : theme.subtitleColor,
+                ),
               ),
             ),
           ],
@@ -1828,10 +1965,13 @@ class _VantablackHomeState extends State<VantablackHome> {
     );
   }
 
-  Widget _buildHardwareTelemetryCard(AppThemeData theme) {
+  Widget _buildHardwareTelemetryCard(AppThemeData theme, {bool isLandscape = false}) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      padding: const EdgeInsets.all(12),
+      margin: EdgeInsets.symmetric(
+        horizontal: isLandscape ? 10 : 14,
+        vertical: isLandscape ? 4 : 10,
+      ),
+      padding: EdgeInsets.all(isLandscape ? 8 : 12),
       decoration: BoxDecoration(
         color: theme.cardColor,
         borderRadius: BorderRadius.circular(theme.borderRadius),
@@ -1842,32 +1982,35 @@ class _VantablackHomeState extends State<VantablackHome> {
         children: [
           Row(
             children: [
-              Icon(Icons.developer_board_rounded, color: theme.primaryColor, size: 16),
+              Icon(Icons.developer_board_rounded, color: theme.primaryColor, size: isLandscape ? 14 : 16),
               const SizedBox(width: 6),
-              Text(
-                "HARDWARE GALAXY TAB",
-                style: TextStyle(
-                  color: theme.textColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Text(
+                  "HARDWARE GALAXY TAB",
+                  style: TextStyle(
+                    color: theme.textColor,
+                    fontSize: isLandscape ? 10 : 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: isLandscape ? 4 : 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("Cuerpos CPU:", style: TextStyle(fontSize: 10, color: theme.subtitleColor)),
-              Text("$_cpuCores Hilos", style: TextStyle(fontSize: 10, color: theme.textColor, fontWeight: FontWeight.bold)),
+              Flexible(child: Text("Cuerpos CPU:", style: TextStyle(fontSize: 10, color: theme.subtitleColor), overflow: TextOverflow.ellipsis)),
+              Flexible(child: Text("$_cpuCores Hilos", style: TextStyle(fontSize: 10, color: theme.textColor, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
             ],
           ),
           const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("RAM Libre:", style: TextStyle(fontSize: 10, color: theme.subtitleColor)),
-              Text("${_freeRamGb.toStringAsFixed(1)} GB / ${_totalRamGb.toStringAsFixed(1)} GB", style: TextStyle(fontSize: 10, color: theme.primaryColor, fontWeight: FontWeight.bold)),
+              Flexible(child: Text("RAM Libre:", style: TextStyle(fontSize: 10, color: theme.subtitleColor), overflow: TextOverflow.ellipsis)),
+              Flexible(child: Text("${_freeRamGb.toStringAsFixed(1)} GB / ${_totalRamGb.toStringAsFixed(1)} GB", style: TextStyle(fontSize: isLandscape ? 9.5 : 10, color: theme.primaryColor, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
             ],
           ),
         ],
@@ -1875,14 +2018,17 @@ class _VantablackHomeState extends State<VantablackHome> {
     );
   }
 
-  Widget _buildContinuousLearningCard(AppThemeData theme) {
+  Widget _buildContinuousLearningCard(AppThemeData theme, {bool isLandscape = false}) {
     final memory = MemoryService.instance;
     final isEnabled = memory.isLearningEnabled;
     final count = memory.memories.length;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      padding: const EdgeInsets.all(12),
+      margin: EdgeInsets.symmetric(
+        horizontal: isLandscape ? 10 : 14,
+        vertical: isLandscape ? 3 : 4,
+      ),
+      padding: EdgeInsets.all(isLandscape ? 8 : 12),
       decoration: BoxDecoration(
         color: theme.cardColor,
         borderRadius: BorderRadius.circular(theme.borderRadius),
@@ -1896,32 +2042,40 @@ class _VantablackHomeState extends State<VantablackHome> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.psychology_rounded,
-                    color: isEnabled ? theme.primaryColor : theme.subtitleColor,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    "APRENDIZAJE IA",
-                    style: TextStyle(
-                      color: theme.textColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.psychology_rounded,
+                      color: isEnabled ? theme.primaryColor : theme.subtitleColor,
+                      size: isLandscape ? 16 : 18,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        "APRENDIZAJE IA",
+                        style: TextStyle(
+                          color: theme.textColor,
+                          fontSize: isLandscape ? 10 : 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              Switch.adaptive(
-                value: isEnabled,
-                activeTrackColor: theme.primaryColor,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                onChanged: (val) async {
-                  await memory.setLearningEnabled(val);
-                  setState(() {});
-                },
+              Transform.scale(
+                scale: isLandscape ? 0.8 : 1.0,
+                child: Switch.adaptive(
+                  value: isEnabled,
+                  activeTrackColor: theme.primaryColor,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (val) async {
+                    await memory.setLearningEnabled(val);
+                    setState(() {});
+                  },
+                ),
               ),
             ],
           ),
@@ -1930,15 +2084,15 @@ class _VantablackHomeState extends State<VantablackHome> {
             isEnabled
                 ? "Aprende preferencias de tus chats."
                 : "Aprendizaje pausado.",
-            style: TextStyle(fontSize: 9.5, color: theme.subtitleColor),
+            style: TextStyle(fontSize: isLandscape ? 8.5 : 9.5, color: theme.subtitleColor),
           ),
           if (isEnabled) ...[
-            const SizedBox(height: 8),
+            SizedBox(height: isLandscape ? 4 : 8),
             InkWell(
               onTap: _mostrarModalMemoriaAprendida,
               borderRadius: BorderRadius.circular(8),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: EdgeInsets.symmetric(horizontal: isLandscape ? 8 : 10, vertical: isLandscape ? 4 : 6),
                 decoration: BoxDecoration(
                   color: theme.primaryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
@@ -1950,7 +2104,7 @@ class _VantablackHomeState extends State<VantablackHome> {
                     Text(
                       "Ver Memoria ($count)",
                       style: TextStyle(
-                        fontSize: 10.5,
+                        fontSize: isLandscape ? 9.5 : 10.5,
                         fontWeight: FontWeight.bold,
                         color: theme.primaryColor,
                       ),
@@ -2000,7 +2154,9 @@ class _VantablackHomeState extends State<VantablackHome> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Container(
-                            constraints: const BoxConstraints(maxHeight: 280),
+                            constraints: BoxConstraints(
+                              maxHeight: (MediaQuery.of(context).size.height * 0.45).clamp(150.0, 280.0),
+                            ),
                             child: ListView.separated(
                               shrinkWrap: true,
                               itemCount: memories.length,
@@ -2060,26 +2216,28 @@ class _VantablackHomeState extends State<VantablackHome> {
           backgroundColor: theme.surfaceColor,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.borderRadius)),
           title: Text("Nueva Instancia de IA Local", style: TextStyle(color: theme.textColor)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: _modelosDisponibles.map((model) {
-              return ListTile(
-                title: Text(model.name, style: TextStyle(color: theme.textColor, fontSize: 14)),
-                subtitle: Text("${model.size} | RAM Req: ${model.requiredRamGb}GB", style: TextStyle(color: theme.subtitleColor, fontSize: 11)),
-                trailing: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: model.badgeColor.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(6),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: _modelosDisponibles.map((model) {
+                return ListTile(
+                  title: Text(model.name, style: TextStyle(color: theme.textColor, fontSize: 14)),
+                  subtitle: Text("${model.size} | RAM Req: ${model.requiredRamGb}GB", style: TextStyle(color: theme.subtitleColor, fontSize: 11)),
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: model.badgeColor.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(model.badge, style: TextStyle(color: model.badgeColor, fontSize: 9, fontWeight: FontWeight.bold)),
                   ),
-                  child: Text(model.badge, style: TextStyle(color: model.badgeColor, fontSize: 9, fontWeight: FontWeight.bold)),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _crearNuevaInstanciaLocal(model.id);
-                },
-              );
-            }).toList(),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _crearNuevaInstanciaLocal(model.id);
+                  },
+                );
+              }).toList(),
+            ),
           ),
         );
       },
