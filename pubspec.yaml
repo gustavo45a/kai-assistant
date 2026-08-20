@@ -21,6 +21,8 @@ dependencies:
   file_picker: ^8.0.0
   image_picker: ^1.1.2
   syncfusion_flutter_pdf: ^34.1.33
+  google_mlkit_text_recognition: ^0.16.0
+  cupertino_icons: ^1.0.8
 
 dev_dependencies:
   flutter_test:
@@ -37,6 +39,10 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   
-  # REGISTRO DEL LOGO DE NEÓN GLOBAL
+  # REGISTRO DEL LOGO Y ASSETS DE VOZ / LIVE MODE
   assets:
     - assets/logo.png
+    - assets/kai_image.jpg
+    - assets/images/
+    - assets/sounds/
+    

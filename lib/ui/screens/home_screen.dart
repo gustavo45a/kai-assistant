@@ -1,34 +1,38 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:open_file/open_file.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
+import 'live_mode_screen.dart';
 import '../../models/app_theme.dart';
 import '../../models/local_model.dart';
 import '../../models/chat_thread.dart';
+import '../../models/kai_persona.dart';
 import '../../services/hardware_scanner.dart';
 import '../../services/local_llm_service.dart';
-import '../../services/zram_memory_manager.dart';
 import '../../services/memory_service.dart';
 import '../../services/app_settings.dart';
+import '../../services/kai_sprite_service.dart';
+import '../../services/kai_tts_service.dart';
 import '../widgets/windows_xp_error_dialog.dart';
 import '../widgets/theme_selector_modal.dart';
 import '../widgets/dynamic_multicolor_background.dart';
+import '../widgets/kai_avatar_view.dart';
+import '../widgets/apple_glass_icon_button.dart';
 
 class VantablackHome extends StatefulWidget {
   final String username;
@@ -54,10 +58,11 @@ class _VantablackHomeState extends State<VantablackHome> {
 
   late AppThemeStyle _currentThemeStyle;
   CoreMode _currentMode = CoreMode.normal;
+  KaiEmotion _currentKaiEmotion = KaiEmotion.neutral;
   List<ChatThread> _threads = [
     ChatThread(
       id: "instancia_local_default",
-      title: "Matriz LLaMA 3.2 1B (Local)",
+      title: "Chat con Kai",
       iaModel: "llama_3_2_1b",
       modeloInicializado: true,
       messages: [
@@ -71,6 +76,7 @@ class _VantablackHomeState extends State<VantablackHome> {
   String? _customBgImagePath;
 
   bool _isGenerating = false;
+  bool _isEngineInitializing = true;
   bool _descargandoOta = false;
   bool _descargandoModelo = false;
   double _progresoOta = 0.0;
@@ -81,18 +87,17 @@ class _VantablackHomeState extends State<VantablackHome> {
   int _cpuCores = 4;
 
   bool isZRamEnabled = true;
-  final bool _ttsEnabled = false;
   bool isWebServidorActive = false;
   bool isModoPro = false;
   bool isVirtualAssistantActive = false;
 
-  final FlutterTts _flutterTts = FlutterTts();
   final stt.SpeechToText _speechToText = stt.SpeechToText();
   bool _isListening = false;
   bool _speechInitialized = false;
 
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<String> _currentStreamingMessage = ValueNotifier<String>('');
 
   final List<LocalModel> _modelosDisponibles = [
     LocalModel(
@@ -131,51 +136,59 @@ class _VantablackHomeState extends State<VantablackHome> {
   void initState() {
     super.initState();
     _currentThemeStyle = widget.currentTheme;
-    _initTts();
-    scheduleMicrotask(() async {
-      await MemoryService.instance.init();
-      final colorVal = await AppSettings.getCustomAccentColor();
-      final bgPath = await AppSettings.getCustomBgImagePath();
-      final diagnostic = await HardwareScanner.scan();
-      if (mounted) {
-        setState(() {
-          _customAccentColor = colorVal != null ? Color(colorVal) : null;
-          _customBgImagePath = bgPath;
-          _cpuCores = diagnostic['cores'];
-          _freeRamGb = diagnostic['freeRamGb'];
-          _totalRamGb = diagnostic['totalRamGb'];
-        });
+    _isEngineInitializing = true;
+
+    // 2. INICIALIZACIÓN ASÍNCRONA NO BLOQUEANTE (Sin congelar el Main Thread)
+    Future.microtask(() async {
+      try {
+        await KaiTtsService.instance.init();
+        await MemoryService.instance.init();
+        final colorVal = await AppSettings.getCustomAccentColor();
+        final bgPath = await AppSettings.getCustomBgImagePath();
+        final diagnostic = await HardwareScanner.scan();
+
+        await _verificarModelosDescargados();
+        await _cargarDatosDesdeDisco();
+
+        // Inicialización en background si el modelo local ya existe
+        if (_activeThread.rutaModeloLocal != null && File(_activeThread.rutaModeloLocal!).existsSync()) {
+          try {
+            await LocalLLMService.instance.initializeRealModel(_activeThread.rutaModeloLocal!, threads: 4);
+            _activeThread.modeloInicializado = true;
+          } catch (_) {}
+        }
+
+        if (mounted) {
+          setState(() {
+            _customAccentColor = colorVal != null ? Color(colorVal) : null;
+            _customBgImagePath = bgPath;
+            _cpuCores = diagnostic['cores'] ?? 4;
+            _freeRamGb = (diagnostic['freeRamGb'] as num?)?.toDouble() ?? 4.0;
+            _totalRamGb = (diagnostic['totalRamGb'] as num?)?.toDouble() ?? 8.0;
+            _isEngineInitializing = false;
+          });
+        }
+        await _checkUpdates();
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isEngineInitializing = false;
+          });
+        }
       }
-      await _verificarModelosDescargados();
-      await _cargarDatosDesdeDisco();
-      await _checkUpdates();
     });
   }
 
-  Future<void> _initTts() async {
-    try {
-      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-        await _flutterTts.setEngine("com.google.android.tts");
-      }
-      await _flutterTts.setLanguage("es-ES");
-      await _flutterTts.setPitch(1.0);
-      await _flutterTts.setSpeechRate(0.5);
-    } catch (e) {
-      debugPrint("Error TTS: $e");
-    }
+  @override
+  void dispose() {
+    _chatController.dispose();
+    _scrollController.dispose();
+    _currentStreamingMessage.dispose();
+    super.dispose();
   }
 
   Future<void> _speakText(String text) async {
-    if (!_ttsEnabled || text.isEmpty) return;
-    try {
-      final cleanText = text
-          .replaceAll(RegExp(r'<[^>]*>'), '')
-          .replaceAll(RegExp(r'[\*\_~`]'), '')
-          .trim();
-      if (cleanText.isNotEmpty) {
-        await _flutterTts.speak(cleanText);
-      }
-    } catch (_) {}
+    await KaiTtsService.instance.speakWithEmotion(text, _currentKaiEmotion);
   }
 
   Future<void> _toggleListening() async {
@@ -187,7 +200,14 @@ class _VantablackHomeState extends State<VantablackHome> {
         }
         return;
       }
-      _speechInitialized = await _speechToText.initialize();
+      _speechInitialized = await _speechToText.initialize(
+        onError: (e) => setState(() => _isListening = false),
+        onStatus: (s) {
+          if (s == 'done' || s == 'notListening') {
+            setState(() => _isListening = false);
+          }
+        },
+      );
     }
 
     if (_isListening) {
@@ -199,12 +219,11 @@ class _VantablackHomeState extends State<VantablackHome> {
         onResult: (result) {
           setState(() {
             _chatController.text = result.recognizedWords;
-            _chatController.selection = TextSelection.fromPosition(
-              TextPosition(offset: _chatController.text.length),
-            );
           });
         },
-        listenOptions: stt.SpeechListenOptions(localeId: "es_ES"),
+        listenOptions: stt.SpeechListenOptions(
+          partialResults: true,
+        ),
       );
     }
   }
@@ -214,42 +233,28 @@ class _VantablackHomeState extends State<VantablackHome> {
       final dio = Dio();
       final response = await dio.get("https://gustavo45a.github.io/kai-assistant/version.json");
       if (response.statusCode == 200) {
-        final data = response.data is String ? jsonDecode(response.data) : response.data;
-        final latestVersion = data["version"] ?? _versionHub;
-        final latestBuild = data["buildNumber"] is int ? data["buildNumber"] : int.tryParse(data["buildNumber"].toString()) ?? 40;
-        final remoteUrl = data["url"] ?? _urlApkRemoto;
-
-        if ((latestBuild > _currentBuildNumber || latestVersion != _versionHub) && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: const Color(0xFF00B4D8),
-              content: Text("⚡ Nueva actualización Vantablack Hub (Build #$latestBuild) disponible!"),
-              action: SnackBarAction(
-                label: "ACTUALIZAR",
-                textColor: Colors.black,
-                onPressed: () => _ejecutarActualizacionOTA(urlDownload: remoteUrl),
-              ),
-            ),
-          );
+        final data = response.data;
+        int remoteBuild = data['build_number'] ?? _currentBuildNumber;
+        if (remoteBuild > _currentBuildNumber) {
+          _ejecutarActualizacionOTA();
         }
       }
     } catch (_) {}
   }
 
-  Future<void> _ejecutarActualizacionOTA({String? urlDownload}) async {
-    if (_descargandoOta) return;
+  Future<void> _ejecutarActualizacionOTA() async {
     setState(() {
       _descargandoOta = true;
       _progresoOta = 0.0;
     });
 
     try {
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await getTemporaryDirectory();
       final savePath = "${dir.path}/vantablack_update.apk";
       final dio = Dio();
 
       await dio.download(
-        urlDownload ?? _urlApkRemoto,
+        _urlApkRemoto,
         savePath,
         onReceiveProgress: (received, total) {
           if (total != -1) {
@@ -260,17 +265,17 @@ class _VantablackHomeState extends State<VantablackHome> {
         },
       );
 
-      setState(() => _descargandoOta = false);
-      final result = await OpenFile.open(savePath);
-      if (result.type != ResultType.done && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("APK guardado en: $savePath")),
-        );
-      }
+      setState(() {
+        _descargandoOta = false;
+      });
+
+      await OpenFile.open(savePath);
     } catch (e) {
-      setState(() => _descargandoOta = false);
+      setState(() {
+        _descargandoOta = false;
+      });
       if (mounted) {
-        _mostrarModalErrorWindowsXP("Error al descargar la actualización OTA: $e");
+        _mostrarModalErrorWindowsXP("Fallo al descargar la actualización OTA: $e");
       }
     }
   }
@@ -287,8 +292,8 @@ class _VantablackHomeState extends State<VantablackHome> {
     } catch (_) {}
   }
 
-  Future<void> _descargarModeloLlmNativamente(ChatThread thread) async {
-    final model = _modelosDisponibles.firstWhere(
+  Future<void> _descargarModeloLlmNativamente(ChatThread thread, {LocalModel? model}) async {
+    final targetModel = model ?? _modelosDisponibles.firstWhere(
       (m) => m.id == thread.iaModel,
       orElse: () => _modelosDisponibles.first,
     );
@@ -300,11 +305,11 @@ class _VantablackHomeState extends State<VantablackHome> {
 
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final filePath = "${dir.path}/${model.id}.gguf";
+      final filePath = "${dir.path}/${targetModel.id}.gguf";
       final dio = Dio();
 
       await dio.download(
-        model.urlGguf,
+        targetModel.urlGguf,
         filePath,
         onReceiveProgress: (received, total) {
           if (total != -1) {
@@ -315,10 +320,11 @@ class _VantablackHomeState extends State<VantablackHome> {
         },
       );
 
-      model.isDownloaded = true;
+      targetModel.isDownloaded = true;
+      thread.iaModel = targetModel.id;
       thread.rutaModeloLocal = filePath;
 
-      await LocalLLMService.instance.initializeRealModel(filePath, threads: _cpuCores > 2 ? 2 : 1);
+      await LocalLLMService.instance.initializeRealModel(filePath, threads: 4);
       thread.modeloInicializado = true;
 
       setState(() {
@@ -329,7 +335,10 @@ class _VantablackHomeState extends State<VantablackHome> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("¡Modelo ${model.name} inicializado nativamente!")),
+          SnackBar(
+            backgroundColor: const Color(0xFF1E2029),
+            content: Text("¡Modelo ${targetModel.name} listo para usar!", style: const TextStyle(color: Color(0xFF00E5FF))),
+          ),
         );
       }
     } catch (e) {
@@ -376,16 +385,33 @@ class _VantablackHomeState extends State<VantablackHome> {
     final newId = const Uuid().v4();
     final newThread = ChatThread(
       id: newId,
-      title: "Matriz ${modelId.toUpperCase().replaceAll('_', ' ')}",
+      title: "Nuevo Chat",
       iaModel: modelId,
       modeloInicializado: true,
       messages: [
-        {"sender": "system", "text": "INSTANCIA KAI V3 INICIALIZADA."},
+        {"sender": "system", "text": "INSTANCIA KAI INICIALIZADA."},
       ],
     );
     setState(() {
-      _threads.add(newThread);
+      _threads.insert(0, newThread);
       _activeThreadId = newId;
+    });
+    _guardarDatosEnDisco();
+  }
+
+  void _borrarThread(String id) {
+    if (_threads.length <= 1) {
+      _crearNuevaInstanciaLocal("llama_3_2_1b");
+      _threads.removeWhere((t) => t.id == id);
+      setState(() {});
+      _guardarDatosEnDisco();
+      return;
+    }
+    setState(() {
+      _threads.removeWhere((t) => t.id == id);
+      if (_activeThreadId == id) {
+        _activeThreadId = _threads.first.id;
+      }
     });
     _guardarDatosEnDisco();
   }
@@ -393,40 +419,58 @@ class _VantablackHomeState extends State<VantablackHome> {
   ChatThread get _activeThread {
     return _threads.firstWhere(
       (t) => t.id == _activeThreadId,
-      orElse: () => _threads.isNotEmpty ? _threads.first : ChatThread(id: '0', title: 'Default', iaModel: 'llama_3_2_1b', modeloInicializado: true, messages: []),
+      orElse: () => _threads.isNotEmpty
+          ? _threads.first
+          : ChatThread(id: '0', title: 'Default', iaModel: 'llama_3_2_1b', modeloInicializado: true, messages: []),
     );
   }
 
-  Future<void> _procesarMensajeLocal() async {
+  Future<void> _procesarMensajeLocal([String? customPrompt]) async {
     final threadActual = _activeThread;
-    if (_chatController.text.trim().isEmpty || threadActual.pensando || _isGenerating) return;
+    final promptToSend = customPrompt ?? _chatController.text.trim();
 
-    final textoUsuario = _chatController.text.trim();
-    _chatController.clear();
+    // 2. BLOQUEO DE ESTADO: Prevenir envíos múltiples concurrentes y 'Bad state: Already generating'
+    if (promptToSend.isEmpty || threadActual.pensando || _isGenerating) return;
+
+    if (customPrompt == null) {
+      _chatController.clear();
+    }
+    await KaiTtsService.instance.stop();
+
+    // Actualizar título del chat si es el primer mensaje del usuario
+    if (threadActual.messages.where((m) => m["sender"] == "user").isEmpty) {
+      final shortTitle = promptToSend.length > 26 ? "${promptToSend.substring(0, 24)}..." : promptToSend;
+      threadActual.title = shortTitle;
+    }
 
     setState(() {
       _isGenerating = true;
-      threadActual.messages.add({"sender": "user", "text": textoUsuario});
+      _currentKaiEmotion = KaiEmotion.thinking;
+      threadActual.messages.add({"sender": "user", "text": promptToSend});
       threadActual.messages.add({"sender": "assistant", "text": "..."});
       threadActual.pensando = true;
     });
 
+    _currentStreamingMessage.value = "...";
     _scrollToBottom();
 
-    // Extraer memoria aprendida si el aprendizaje continuo está activo
-    MemoryService.instance.extractMemoryFromInteraction(textoUsuario);
+    // Extraer memoria aprendida
+    MemoryService.instance.extractMemoryFromInteraction(promptToSend);
 
     try {
       if (!LocalLLMService.instance.isModelLoaded && threadActual.rutaModeloLocal != null) {
-        await LocalLLMService.instance.initializeRealModel(threadActual.rutaModeloLocal!, threads: 2);
+        // 3. OPTIMIZACIÓN C++: 4 hilos configurados para rendimiento móvil óptimo
+        await LocalLLMService.instance.initializeRealModel(threadActual.rutaModeloLocal!, threads: 4);
         threadActual.modeloInicializado = true;
       }
 
       if (LocalLLMService.instance.isModelLoaded) {
         final stream = LocalLLMService.instance.generateResponseStream(
-          textoUsuario,
+          promptToSend,
           {
             'modoEstudiante': _currentMode == CoreMode.estudiante,
+            'mode': _currentMode,
+            'username': widget.username,
             'memoriaAprendida': MemoryService.instance.isLearningEnabled
                 ? MemoryService.instance.memories
                 : <String>[],
@@ -436,40 +480,57 @@ class _VantablackHomeState extends State<VantablackHome> {
 
         final responseBuffer = StringBuffer();
         await for (final chunk in stream) {
+          if (!_isGenerating) break;
           responseBuffer.write(chunk);
-          if (mounted) {
-            setState(() {
-              threadActual.messages.last = {"sender": "assistant", "text": responseBuffer.toString()};
-            });
-            _scrollToBottom();
+          final parseResult = KaiPersona.extractEmotionFromStream(responseBuffer.toString());
+          final cleanStreaming = parseResult.cleanText.isNotEmpty ? parseResult.cleanText : responseBuffer.toString();
+
+          if (parseResult.detectedEmotion != null && parseResult.detectedEmotion != _currentKaiEmotion) {
+            _currentKaiEmotion = parseResult.detectedEmotion!;
           }
+
+          // 1. OPTIMIZACIÓN DE RENDERIZADO: Aislamiento del token en ValueNotifier sin setState() global
+          _currentStreamingMessage.value = cleanStreaming;
         }
-        await _speakText(responseBuffer.toString());
+
+        final finalResult = KaiPersona.extractEmotionFromStream(responseBuffer.toString());
+        final cleanText = finalResult.cleanText.isNotEmpty ? finalResult.cleanText : responseBuffer.toString();
+
+        if (finalResult.detectedEmotion != null) {
+          _currentKaiEmotion = finalResult.detectedEmotion!;
+        }
+        threadActual.messages.last = {"sender": "assistant", "text": cleanText};
+        await _speakText(cleanText);
       } else {
-        await Future.delayed(const Duration(seconds: 1));
-        final fallbackMsg = "El modelo ${threadActual.iaModel} requiere ser descargado a almacenamiento local primero.";
-        setState(() {
-          threadActual.messages.last = {"sender": "assistant", "text": fallbackMsg};
-        });
+        await Future.delayed(const Duration(milliseconds: 600));
+        final fallbackMsg = "El modelo ${_getNomModel(_activeThread.iaModel)} no está descargado aún. Pulsa el botón de descarga en la barra superior o en el sidebar para cargarlo localmente.";
+        threadActual.messages.last = {"sender": "assistant", "text": fallbackMsg};
+        _currentKaiEmotion = KaiEmotion.neutral;
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          threadActual.messages.last = {"sender": "assistant", "text": "[EXCEPCIÓN LOCAL]: $e"};
-        });
-      }
+      // 4. MANEJO DE ERRORES: Capturar fallo y presentar mensaje amigable en el chat
+      final errorMsg = "⚠️ Lo siento, ocurrió un error durante la inferencia local ($e). Por favor, intenta de nuevo.";
+      threadActual.messages.last = {"sender": "assistant", "text": errorMsg};
+      _currentKaiEmotion = KaiEmotion.neutral;
     } finally {
+      // 2. BLOQUEO DE ESTADO: Resetear isGenerating tanto al finalizar como al fallar
+      _currentStreamingMessage.value = "";
       if (mounted) {
         setState(() {
-          _isGenerating = false;
           threadActual.pensando = false;
+          _isGenerating = false;
         });
-      } else {
-        _isGenerating = false;
-        threadActual.pensando = false;
+        _scrollToBottom();
+        _guardarDatosEnDisco();
       }
-      await _guardarDatosEnDisco();
     }
+  }
+
+  String _getNomModel(String id) {
+    for (final m in _modelosDisponibles) {
+      if (m.id == id) return m.name;
+    }
+    return id;
   }
 
   void _scrollToBottom() {
@@ -477,136 +538,692 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
+          duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
         );
       }
     });
   }
 
-  // --- PANEL DE HERRAMIENTAS LOCALES (TOOLBOX) ---
-  void _mostrarModalToolbox(BuildContext context) {
-    final theme = AppThemeConfig.getTheme(_currentThemeStyle);
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-
+  // --- MODAL DE MODELOS Y DESCARGA DIRECTA HUGGING FACE ---
+  void _mostrarModalModelos() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) {
-        return ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * (isLandscape ? 0.90 : 0.80),
-          ),
-          child: Container(
-            margin: EdgeInsets.all(isLandscape ? 8 : 16),
-            padding: EdgeInsets.all(isLandscape ? 14 : 20),
-            decoration: BoxDecoration(
-              color: theme.surfaceColor,
-              borderRadius: BorderRadius.circular(theme.borderRadius),
-              border: Border.all(color: theme.primaryColor.withValues(alpha: 0.5), width: 1.5),
-              boxShadow: theme.shadows,
-            ),
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.handyman_rounded, color: theme.primaryColor, size: isLandscape ? 18 : 22),
-                      const SizedBox(width: 10),
-                      Text(
-                        "PANEL DE HERRAMIENTAS LOCALES (TOOLBOX)",
-                        style: TextStyle(
-                          color: theme.textColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: isLandscape ? 11 : 13,
-                          letterSpacing: 1.0,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: Icon(Icons.close_rounded, color: theme.subtitleColor, size: isLandscape ? 18 : 20),
-                        onPressed: () => Navigator.pop(context),
-                      )
-                    ],
-                  ),
-                  SizedBox(height: isLandscape ? 8 : 16),
-                  GridView.count(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisCount: isLandscape ? 3 : 2,
-                    crossAxisSpacing: isLandscape ? 8 : 12,
-                    mainAxisSpacing: isLandscape ? 8 : 12,
-                    childAspectRatio: isLandscape ? 2.5 : 2.1,
-                    children: [
-                      _buildToolTile(
-                        theme: theme,
-                        title: "Tomar Foto Cámara",
-                        subtitle: "Cámara -> Análisis IA",
-                        icon: Icons.photo_camera_rounded,
-                        color: const Color(0xFFFF0055),
-                        onTap: () {
-                          Navigator.pop(context);
-                          _tomarFotoYAnalizarIA(source: ImageSource.camera);
-                        },
-                      ),
-                  _buildToolTile(
-                    theme: theme,
-                    title: "Captura y Análisis",
-                    subtitle: "Screenshot -> Modelo IA",
-                    icon: Icons.camera_alt_rounded,
-                    color: const Color(0xFF00B4D8),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _ejecutarCapturaPantallaAnalisis();
-                    },
-                  ),
-                  _buildToolTile(
-                    theme: theme,
-                    title: "Resumidor RAG Local",
-                    subtitle: "Inyectar .txt / .pdf",
-                    icon: Icons.description_rounded,
-                    color: const Color(0xFF9D4EDD),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _ejecutarResumidorRagLocal();
-                    },
-                  ),
-                  _buildToolTile(
-                    theme: theme,
-                    title: "Cajón Utilidades Dev",
-                    subtitle: "Formatear JSON / Code",
-                    icon: Icons.code_rounded,
-                    color: const Color(0xFF2ECC71),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _mostrarCajonUtilidadesDev();
-                    },
-                  ),
-                  _buildToolTile(
-                    theme: theme,
-                    title: "Optimizador Memoria",
-                    subtitle: "Limpiar Caché y RAM",
-                    icon: Icons.bolt_rounded,
-                    color: const Color(0xFFFF9500),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _ejecutarOptimizadorMemoria();
-                    },
-                  ),
-                ],
+        final theme = AppThemeConfig.getTheme(_currentThemeStyle);
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: const EdgeInsets.all(20),
+              margin: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF141721),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: const Color(0xFF2E3245), width: 1.2),
               ),
-            ],
-          ),
-        ),
-      ),
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.memory_rounded, color: theme.primaryColor, size: 22),
+                            const SizedBox(width: 8),
+                            Text(
+                              "MODELOS GGUF LOCALES",
+                              style: TextStyle(
+                                color: theme.textColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close_rounded, color: theme.subtitleColor, size: 20),
+                          onPressed: () => Navigator.pop(context),
+                        )
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "Descarga modelos de Hugging Face y ejecútalos 100% offline con inferencia nativa.",
+                      style: TextStyle(color: theme.subtitleColor, fontSize: 11.5),
+                    ),
+                    const SizedBox(height: 16),
+                    ..._modelosDisponibles.map((model) {
+                      final isActiveInThread = _activeThread.iaModel == model.id;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isActiveInThread
+                              ? const Color(0xFF1A2234)
+                              : const Color(0xFF1B1D27),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isActiveInThread
+                                ? theme.primaryColor.withValues(alpha: 0.6)
+                                : const Color(0xFF282C3D),
+                            width: isActiveInThread ? 1.4 : 1.0,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Text(
+                                        model.name,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13.5,
+                                          color: theme.textColor,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: model.badgeColor.withValues(alpha: 0.18),
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: model.badgeColor, width: 0.8),
+                                        ),
+                                        child: Text(
+                                          model.badge,
+                                          style: TextStyle(
+                                            color: model.badgeColor,
+                                            fontSize: 8.5,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  model.size,
+                                  style: TextStyle(
+                                    color: theme.subtitleColor,
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              model.description,
+                              style: TextStyle(color: theme.subtitleColor, fontSize: 11, height: 1.3),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  "RAM Req: ${model.requiredRamGb} GB",
+                                  style: TextStyle(color: theme.subtitleColor, fontSize: 10.5, fontFamily: 'monospace'),
+                                ),
+                                if (model.isDownloaded) ...[
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isActiveInThread
+                                          ? theme.primaryColor
+                                          : const Color(0xFF2A2D3D),
+                                      foregroundColor: isActiveInThread ? Colors.black : Colors.white,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    ),
+                                    onPressed: () {
+                                      setState(() {
+                                        _activeThread.iaModel = model.id;
+                                        _activeThread.modeloInicializado = true;
+                                      });
+                                      _guardarDatosEnDisco();
+                                      Navigator.pop(context);
+                                    },
+                                    icon: Icon(isActiveInThread ? Icons.check_circle_rounded : Icons.play_arrow_rounded, size: 14),
+                                    label: Text(
+                                      isActiveInThread ? "Activo" : "Usar en Chat",
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ] else if (_descargandoModelo && _activeThread.iaModel == model.id) ...[
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(left: 16),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          LinearProgressIndicator(value: _progresoModelo, color: theme.primaryColor),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            "${(_progresoModelo * 100).toStringAsFixed(0)}%",
+                                            style: TextStyle(fontSize: 10, color: theme.primaryColor, fontWeight: FontWeight.bold),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ] else ...[
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: theme.primaryColor,
+                                      foregroundColor: Colors.black,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    ),
+                                    onPressed: () async {
+                                      Navigator.pop(context);
+                                      await _descargarModeloLlmNativamente(_activeThread, model: model);
+                                    },
+                                    icon: const Icon(Icons.cloud_download_rounded, size: 14),
+                                    label: Text("Descargar (${model.size})", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
-  },
-);
-}
+  }
+
+  // --- MODAL DE ESTADO COGNITIVO Y SPRITES DE KAI ---
+  void _mostrarModalKaiStatus(BuildContext context) {
+    final theme = AppThemeConfig.getTheme(_currentThemeStyle);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFF141721),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: const Color(0xFF2E3245), width: 1.2),
+              ),
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.auto_awesome_rounded, color: theme.primaryColor, size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              "NÚCLEO KAI AI",
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2,
+                                color: theme.textColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close_rounded, color: theme.subtitleColor, size: 20),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    KaiAvatarView(
+                      emotion: _currentKaiEmotion,
+                      isThinking: _isGenerating,
+                      size: 72,
+                      theme: theme,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(KaiPersona.name, style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: theme.textColor)),
+                    Text(
+                      KaiPersona.roleTitle,
+                      style: TextStyle(fontSize: 11, color: _currentKaiEmotion.moodColor, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Emociones
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: KaiEmotion.values.map((emotion) {
+                        final isSelected = emotion == _currentKaiEmotion;
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () {
+                            setState(() => _currentKaiEmotion = emotion);
+                            setModalState(() {});
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? emotion.moodColor.withValues(alpha: 0.22)
+                                  : const Color(0xFF1B1D27),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isSelected ? emotion.moodColor : const Color(0xFF282C3D),
+                                width: isSelected ? 1.2 : 0.8,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(emotion.fallbackIcon, size: 13, color: emotion.moodColor),
+                                const SizedBox(width: 4),
+                                Text(
+                                  emotion.label,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    color: isSelected ? theme.textColor : theme.subtitleColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Sprites locales
+                    FutureBuilder<Map<KaiEmotion, bool>>(
+                      future: KaiSpriteService.instance.checkSpritesExist(),
+                      builder: (context, snapshot) {
+                        final spriteMap = snapshot.data ?? {};
+                        final allReady = KaiEmotion.values.every((e) => spriteMap[e] == true);
+                        final readyCount = KaiEmotion.values.where((e) => spriteMap[e] == true).length;
+                        final isGenerating = KaiSpriteService.instance.isGenerating;
+
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1B1D27),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: allReady ? theme.primaryColor.withValues(alpha: 0.4) : const Color(0xFFFF9500).withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text("SPRITES LOCALES", style: TextStyle(fontSize: 10, color: theme.subtitleColor, fontWeight: FontWeight.bold)),
+                                  Text("$readyCount/5 Listos", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: allReady ? const Color(0xFF2ECC71) : const Color(0xFFFF9500))),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              if (isGenerating) ...[
+                                LinearProgressIndicator(value: KaiSpriteService.instance.generationProgress, color: theme.primaryColor),
+                                const SizedBox(height: 4),
+                                Text(KaiSpriteService.instance.generationStatusMessage, style: TextStyle(fontSize: 10, color: theme.primaryColor)),
+                              ] else ...[
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: theme.primaryColor,
+                                      foregroundColor: Colors.black,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                    ),
+                                    onPressed: () async {
+                                      await KaiSpriteService.instance.generateAllSprites(
+                                        onProgress: (p, s, e) {
+                                          if (context.mounted) setModalState(() {});
+                                        },
+                                      );
+                                      if (context.mounted) setModalState(() {});
+                                    },
+                                    icon: const Icon(Icons.palette_rounded, size: 14),
+                                    label: Text(allReady ? "Regenerar Sprites HD" : "Generar Sprites (Offline PNG)", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // --- MODAL DE AJUSTES & TELEMETRÍA (REEMPLAZO DE CARDS BULKY DEL SIDEBAR) ---
+  void _mostrarModalAjustesTelemetria() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        final theme = AppThemeConfig.getTheme(_currentThemeStyle);
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Container(
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFF141721),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: const Color(0xFF2E3245), width: 1.2),
+              ),
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.tune_rounded, color: theme.primaryColor, size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              "AJUSTES & TELEMETRÍA",
+                              style: TextStyle(
+                                color: theme.textColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                letterSpacing: 1.1,
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close_rounded, color: theme.subtitleColor, size: 20),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // TELEMETRÍA HARDWARE
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B1D27),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFF282C3D)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.developer_board_rounded, color: theme.primaryColor, size: 16),
+                              const SizedBox(width: 6),
+                              Text("HARDWARE & MEMORIA", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 11)),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text("Cores CPU:", style: TextStyle(color: theme.subtitleColor, fontSize: 11)),
+                              Text("$_cpuCores Hilos", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 11)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text("RAM Disponible:", style: TextStyle(color: theme.subtitleColor, fontSize: 11)),
+                              Text("${_freeRamGb.toStringAsFixed(1)} GB / ${_totalRamGb.toStringAsFixed(1)} GB", style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.bold, fontSize: 11, fontFamily: 'monospace')),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // APRENDIZAJE IA
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B1D27),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFF282C3D)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text("Aprendizaje Continuo IA", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                                const SizedBox(height: 2),
+                                Text("Memorias aprendidas: ${MemoryService.instance.memories.length}", style: TextStyle(color: theme.subtitleColor, fontSize: 10.5)),
+                              ],
+                            ),
+                          ),
+                          Switch.adaptive(
+                            value: MemoryService.instance.isLearningEnabled,
+                            activeTrackColor: theme.primaryColor,
+                            onChanged: (val) async {
+                              await MemoryService.instance.setLearningEnabled(val);
+                              setDialogState(() {});
+                              setState(() {});
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // ACTUALIZACIÓN OTA
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFF2E3245)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        onPressed: _ejecutarActualizacionOTA,
+                        icon: const Icon(Icons.system_update_rounded, size: 16, color: Color(0xFFFF9500)),
+                        label: Text("Buscar Actualización OTA (v$_versionHub #$_currentBuildNumber)", style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                      ),
+                    ),
+                    if (_descargandoOta) ...[
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(value: _progresoOta, color: const Color(0xFFFF9500)),
+                      const SizedBox(height: 4),
+                      Text("Descargando: ${(_progresoOta * 100).toStringAsFixed(0)}%", style: const TextStyle(color: Color(0xFFFF9500), fontSize: 10)),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // --- MODAL TOOLBOX (HERRAMIENTAS / ATTACHMENTS) ---
+  void _mostrarModalToolbox(BuildContext context) {
+    final theme = AppThemeConfig.getTheme(_currentThemeStyle);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: const Color(0xFF141721),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFF2E3245), width: 1.2),
+          ),
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.handyman_rounded, color: theme.primaryColor, size: 18),
+                        const SizedBox(width: 8),
+                        Text("HERRAMIENTAS LOCALES", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 12.5, letterSpacing: 1.0)),
+                      ],
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close_rounded, color: theme.subtitleColor, size: 18),
+                      onPressed: () => Navigator.pop(context),
+                    )
+                  ],
+                ),
+                const SizedBox(height: 12),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  childAspectRatio: 2.2,
+                  children: [
+                    _buildToolTile(
+                      theme: theme,
+                      title: "Cámara OCR",
+                      subtitle: "Capturar -> IA",
+                      icon: Icons.photo_camera_rounded,
+                      color: const Color(0xFFFF0055),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _tomarFotoYAnalizarIA(source: ImageSource.camera);
+                      },
+                    ),
+                    _buildToolTile(
+                      theme: theme,
+                      title: "Galería OCR",
+                      subtitle: "Imagen -> IA",
+                      icon: Icons.image_rounded,
+                      color: const Color(0xFF00B4D8),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _tomarFotoYAnalizarIA(source: ImageSource.gallery);
+                      },
+                    ),
+                    _buildToolTile(
+                      theme: theme,
+                      title: "Resumidor RAG",
+                      subtitle: "Inyectar .txt / .pdf",
+                      icon: Icons.description_rounded,
+                      color: const Color(0xFF9D4EDD),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _ejecutarResumidorRagLocal();
+                      },
+                    ),
+                    _buildToolTile(
+                      theme: theme,
+                      title: "Cajón Dev",
+                      subtitle: "JSON & Código",
+                      icon: Icons.code_rounded,
+                      color: const Color(0xFF2ECC71),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _mostrarCajonUtilidadesDev();
+                      },
+                    ),
+                    _buildToolTile(
+                      theme: theme,
+                      title: "Voz de Kai",
+                      subtitle: KaiTtsService.instance.isEnabled ? "Activada" : "Silenciada",
+                      icon: KaiTtsService.instance.isEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                      color: const Color(0xFF00E5FF),
+                      onTap: () {
+                        Navigator.pop(context);
+                        setState(() {
+                          KaiTtsService.instance.toggleEnabled();
+                        });
+                      },
+                    ),
+                    _buildToolTile(
+                      theme: theme,
+                      title: "Modo Live",
+                      subtitle: "Voz Continua IA",
+                      icon: Icons.graphic_eq_rounded,
+                      color: const Color(0xFF00E5FF),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.of(context).push(
+                          CupertinoPageRoute(
+                            builder: (context) => LiveModeScreen(
+                              username: widget.username,
+                              currentTheme: _currentThemeStyle,
+                              initialMode: _currentMode,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    _buildToolTile(
+                      theme: theme,
+                      title: "Modelos GGUF",
+                      subtitle: "Gestionar",
+                      icon: Icons.cloud_download_rounded,
+                      color: const Color(0xFFFF9500),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _mostrarModalModelos();
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildToolTile({
     required AppThemeData theme,
@@ -616,731 +1233,211 @@ class _VantablackHomeState extends State<VantablackHome> {
     required Color color,
     required VoidCallback onTap,
   }) {
-    return InkWell(
+    return AppleGlassPill(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(theme.borderRadius),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: theme.cardColor,
-          borderRadius: BorderRadius.circular(theme.borderRadius),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-          boxShadow: [
-            BoxShadow(color: color.withValues(alpha: 0.08), blurRadius: 10),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      borderRadius: 16,
+      borderColor: color.withValues(alpha: 0.35),
+      backgroundColor: const Color(0xFF181A24).withValues(alpha: 0.65),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color.withValues(alpha: 0.30), width: 0.8),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: theme.textColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: theme.subtitleColor,
-                      fontSize: 10,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
+            child: Icon(icon, color: color, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 11.5)),
+                Text(subtitle, style: TextStyle(color: theme.subtitleColor, fontSize: 9.5), overflow: TextOverflow.ellipsis),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  // TOOL 1: Captura de pantalla y análisis
-  Future<void> _ejecutarCapturaPantallaAnalisis() async {
+  // --- OCR Y RAG ISOLATE HELPERS ---
+  Future<void> _tomarFotoYAnalizarIA({required ImageSource source}) async {
     try {
-      final boundary = _repaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(source: source);
+      if (pickedFile == null) return;
+
+      final inputImage = InputImage.fromFilePath(pickedFile.path);
+      final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+      final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
+      await textRecognizer.close();
+
+      final textoDetectado = recognizedText.text.trim();
+      if (textoDetectado.isEmpty) {
         if (mounted) {
-          _mostrarModalErrorWindowsXP("No se pudo obtener el renderizado de la pantalla actual.");
+          _mostrarModalErrorWindowsXP("No se detectó texto legible en la imagen.");
         }
         return;
       }
 
-      final image = await boundary.toImage(pixelRatio: 1.5);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      final bytes = byteData?.buffer.asUint8List();
-
-      if (bytes != null && mounted) {
-        final promptController = TextEditingController(
-          text: "Analiza la captura de pantalla de esta interfaz e identifica los elementos visuales clave.",
-        );
-
-        showDialog(
-          context: context,
-          builder: (context) {
-            final theme = AppThemeConfig.getTheme(_currentThemeStyle);
-            return AlertDialog(
-              backgroundColor: theme.surfaceColor,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.borderRadius)),
-              title: Row(
-                children: [
-                  Icon(Icons.camera_alt_rounded, color: theme.primaryColor),
-                  const SizedBox(width: 8),
-                  Text("Captura de Pantalla", style: TextStyle(color: theme.textColor, fontSize: 16)),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.memory(bytes, height: 180, fit: BoxFit.cover),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: promptController,
-                      maxLines: 3,
-                      style: TextStyle(color: theme.textColor, fontSize: 13),
-                      decoration: InputDecoration(
-                        labelText: "Instrucción de análisis IA",
-                        labelStyle: TextStyle(color: theme.subtitleColor),
-                        filled: true,
-                        fillColor: theme.backgroundColor,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text("Cancelar", style: TextStyle(color: theme.subtitleColor)),
-                ),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: theme.primaryColor),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    final prompt = promptController.text.trim();
-                    _chatController.text = "[CAPTURA DE PANTALLA ADJUNTA - VANTABLACK V3]\n$prompt";
-                    _procesarMensajeLocal();
-                  },
-                  icon: const Icon(Icons.send_rounded, size: 16, color: Colors.black),
-                  label: const Text("Enviar a la IA", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      }
+      _chatController.text = "Analiza el siguiente texto extraído mediante OCR:\n\n$textoDetectado";
+      _procesarMensajeLocal();
     } catch (e) {
       if (mounted) {
-        _mostrarModalErrorWindowsXP("Error al capturar pantalla: $e");
+        _mostrarModalErrorWindowsXP("Error en módulo OCR: $e");
       }
     }
   }
 
-  // TOOL 1.5: Tomar foto con cámara y análisis con IA
-  Future<void> _tomarFotoYAnalizarIA({required ImageSource source}) async {
-    try {
-      if (source == ImageSource.camera) {
-        final status = await Permission.camera.request();
-        if (!status.isGranted) {
-          if (mounted) {
-            _mostrarModalErrorWindowsXP(
-              "Se requiere permiso de cámara para tomar fotos.",
-              titulo: "Permiso Denegado - Vantablack Hub",
-            );
-          }
-          return;
-        }
-      }
-
-      final picker = ImagePicker();
-      final XFile? pickedFile = await picker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 85,
-      );
-
-      if (pickedFile == null) return;
-
-      final bytes = await pickedFile.readAsBytes();
-      if (!mounted) return;
-
-      final promptController = TextEditingController(
-        text: "Analiza esta fotografía e identifica los elementos visuales principales, detalles u objetos.",
-      );
-
-      showDialog(
-        context: context,
-        builder: (context) {
-          final theme = AppThemeConfig.getTheme(_currentThemeStyle);
-          return AlertDialog(
-            backgroundColor: theme.surfaceColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.borderRadius)),
-            title: Row(
-              children: [
-                Icon(Icons.photo_camera_rounded, color: _getModeAccentColor(theme)),
-                const SizedBox(width: 8),
-                Text(
-                  source == ImageSource.camera ? "Foto Tomada con Cámara" : "Foto de Galería",
-                  style: TextStyle(color: theme.textColor, fontSize: 16),
-                ),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: Image.memory(bytes, height: 200, fit: BoxFit.cover),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: promptController,
-                    maxLines: 3,
-                    style: TextStyle(color: theme.textColor, fontSize: 13),
-                    decoration: InputDecoration(
-                      labelText: "Instrucción de Análisis para la IA",
-                      labelStyle: TextStyle(color: theme.subtitleColor),
-                      filled: true,
-                      fillColor: theme.backgroundColor,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text("Cancelar", style: TextStyle(color: theme.subtitleColor)),
-              ),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: _getModeAccentColor(theme)),
-                onPressed: () {
-                  Navigator.pop(context);
-                  final prompt = promptController.text.trim();
-                  _chatController.text = "[FOTOGRAFÍA CAPTURADA - VANTABLACK VISION]\n"
-                      "Archivo: ${pickedFile.name} | Tamaño: ${bytes.length} bytes\n\n"
-                      "Instrucción: $prompt";
-                  _procesarMensajeLocal();
-                },
-                icon: const Icon(Icons.send_rounded, size: 16, color: Colors.black),
-                label: const Text("Analizar con la IA", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-              ),
-            ],
-          );
-        },
-      );
-    } catch (e) {
-      if (mounted) {
-        _mostrarModalErrorWindowsXP("Error al procesar foto: $e");
-      }
-    }
-  }
-
-  // TOOL 2: Resumidor RAG Local
   Future<void> _ejecutarResumidorRagLocal() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['txt', 'pdf', 'md', 'json', 'log', 'csv', 'dart', 'py'],
+        allowedExtensions: ['txt', 'pdf', 'md', 'json'],
       );
 
-      if (result != null && result.files.isNotEmpty) {
-        final pickedFile = result.files.first;
-        String rawBytesString = '';
+      if (result == null || result.files.isEmpty || result.files.first.path == null) return;
 
-        if (pickedFile.path != null) {
-          final file = File(pickedFile.path!);
-          final ext = pickedFile.extension?.toLowerCase() ?? '';
-          final bytes = await file.readAsBytes();
-          if (ext == 'pdf') {
-            rawBytesString = _parsePdfBytes(bytes);
-          } else {
-            rawBytesString = utf8.decode(bytes, allowMalformed: true);
-          }
-        } else if (pickedFile.bytes != null) {
-          final ext = pickedFile.extension?.toLowerCase() ?? '';
-          if (ext == 'pdf') {
-            rawBytesString = _parsePdfBytes(pickedFile.bytes!);
-          } else {
-            rawBytesString = utf8.decode(pickedFile.bytes!, allowMalformed: true);
-          }
-        }
+      final path = result.files.first.path!;
+      final extension = path.split('.').last.toLowerCase();
+      String contenidoExtraido = "";
 
-        // Filtrado estricto de texto: elimina caracteres corruptos o no imprimibles
-        String cleanText = rawBytesString.replaceAll(RegExp(r'[^\x20-\x7E\n\áéíóúÁÉÍÓÚñÑüÜ]'), '');
-
-        // Rechazo limpio antes de invocar el motor C++ si el archivo no contiene texto legible
-        if (cleanText.trim().isEmpty) {
-          if (mounted) {
-            _mostrarModalErrorWindowsXP("El documento '${pickedFile.name}' no contiene texto legible o es un archivo binario no compatible.");
-          }
-          return;
-        }
-
-        if (cleanText.length > 3000) {
-          cleanText = "${cleanText.substring(0, 3000)}\n...[CONTENIDO TRUNCADO POR TAMAÑO DE CONTEXTO]";
-        }
-
-        _chatController.text = "[DOCUMENTO RAG LOCAL: ${pickedFile.name}]\n"
-            "Formato: .${pickedFile.extension} | Tamaño: ${pickedFile.size} bytes\n\n"
-            "--- CONTENIDO EXTRAÍDO ---\n"
-            "$cleanText\n"
-            "--- FIN CONTENIDO ---\n\n"
-            "Genera un resumen estructurado con puntos clave de este documento.";
-
-        _procesarMensajeLocal();
+      if (extension == 'pdf') {
+        final bytes = await File(path).readAsBytes();
+        final PdfDocument document = PdfDocument(inputBytes: bytes);
+        final PdfTextExtractor extractor = PdfTextExtractor(document);
+        contenidoExtraido = extractor.extractText();
+        document.dispose();
+      } else {
+        contenidoExtraido = await File(path).readAsString();
       }
+
+      if (contenidoExtraido.trim().isEmpty) {
+        if (mounted) {
+          _mostrarModalErrorWindowsXP("El archivo seleccionado está vacío.");
+        }
+        return;
+      }
+
+      final fragmento = contenidoExtraido.length > 2000
+          ? "${contenidoExtraido.substring(0, 2000)}...\n[Truncado para límite de contexto]"
+          : contenidoExtraido;
+
+      _chatController.text = "Documento inyectado vía RAG (${path.split('/').last}):\n\n$fragmento\n\nPor favor analiza y resume este contenido.";
+      _procesarMensajeLocal();
     } catch (e) {
       if (mounted) {
-        _mostrarModalErrorWindowsXP("Error al leer archivo RAG: $e");
+        _mostrarModalErrorWindowsXP("Error al procesar documento RAG: $e");
       }
     }
   }
 
-  String _parsePdfBytes(Uint8List bytes) {
-    try {
-      final PdfDocument document = PdfDocument(inputBytes: bytes);
-      final String extractedText = PdfTextExtractor(document).extractText();
-      document.dispose();
-      final cleaned = extractedText.replaceAll(RegExp(r'[^\x20-\x7E\n\áéíóúÁÉÍÓÚñÑüÜ]'), '').trim();
-      if (cleaned.isNotEmpty) {
-        return cleaned;
-      }
-    } catch (e) {
-      debugPrint("Error al extraer texto de PDF: $e");
-    }
-    return "";
+  void _mostrarCajonUtilidadesDev() {
+    final theme = AppThemeConfig.getTheme(_currentThemeStyle);
+    final textEditController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF141721),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Icon(Icons.code_rounded, color: theme.primaryColor),
+              const SizedBox(width: 8),
+              Text("Cajón Dev: Formateador", style: TextStyle(color: theme.textColor, fontSize: 14)),
+            ],
+          ),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: textEditController,
+                  maxLines: 8,
+                  style: TextStyle(color: theme.textColor, fontSize: 11.5, fontFamily: 'monospace'),
+                  decoration: InputDecoration(
+                    hintText: "Pega JSON o código aquí...",
+                    hintStyle: TextStyle(color: theme.subtitleColor),
+                    filled: true,
+                    fillColor: const Color(0xFF1B1D27),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: theme.primaryColor),
+                        onPressed: () {
+                          try {
+                            final obj = jsonDecode(textEditController.text);
+                            const encoder = JsonEncoder.withIndent('  ');
+                            textEditController.text = encoder.convert(obj);
+                          } catch (_) {}
+                        },
+                        child: const Text("Formatear JSON", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: theme.secondaryColor),
+                        onPressed: () {
+                          _chatController.text = "Analiza el siguiente código y optimízalo:\n\n```\n${textEditController.text}\n```";
+                          Navigator.pop(context);
+                          _procesarMensajeLocal();
+                        },
+                        child: const Text("Enviar a Kai", style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _mostrarModalErrorWindowsXP(String mensaje, {String titulo = "Error crítico - Vantablack Hub"}) {
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-          child: WindowsXPErrorDialog(mensaje: mensaje, titulo: titulo),
-        );
-      },
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: WindowsXPErrorDialog(
+          titulo: titulo,
+          mensaje: mensaje,
+        ),
+      ),
     );
   }
 
-  // TOOL 3: Cajón de Utilidades Dev
-  void _mostrarCajonUtilidadesDev() {
-    final theme = AppThemeConfig.getTheme(_currentThemeStyle);
-    final codeController = TextEditingController();
-    String validationResult = "";
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: theme.surfaceColor,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.borderRadius)),
-              title: Row(
-                children: [
-                  Icon(Icons.code_rounded, color: theme.primaryColor),
-                  const SizedBox(width: 8),
-                  Text("Cajón de Utilidades Dev", style: TextStyle(color: theme.textColor, fontSize: 16)),
-                ],
-              ),
-              content: SizedBox(
-                width: 500,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        controller: codeController,
-                        maxLines: 6,
-                        style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText: "Pega aquí tu fragmento de Código o JSON sin formatear...",
-                          hintStyle: TextStyle(color: theme.subtitleColor),
-                          filled: true,
-                          fillColor: theme.backgroundColor,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00B4D8)),
-                            onPressed: () {
-                              try {
-                                final obj = jsonDecode(codeController.text);
-                                final pretty = const JsonEncoder.withIndent('  ').convert(obj);
-                                setDialogState(() {
-                                  codeController.text = pretty;
-                                  validationResult = "✅ JSON Válido y Formateado Correctamente";
-                                });
-                              } catch (e) {
-                                setDialogState(() {
-                                  validationResult = "❌ Error de Sintaxis JSON: $e";
-                                });
-                              }
-                            },
-                            icon: const Icon(Icons.data_object_rounded, size: 14, color: Colors.black),
-                            label: const Text("Formatear JSON", style: TextStyle(color: Colors.black, fontSize: 11)),
-                          ),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF9D4EDD)),
-                            onPressed: () {
-                              final code = codeController.text;
-                              int openBraces = 0, openParens = 0, openBrackets = 0;
-                              for (var rune in code.runes) {
-                                final char = String.fromCharCode(rune);
-                                if (char == '{') openBraces++;
-                                if (char == '}') openBraces--;
-                                if (char == '(') openParens++;
-                                if (char == ')') openParens--;
-                                if (char == '[') openBrackets++;
-                                if (char == ']') openBrackets--;
-                              }
-                              if (openBraces == 0 && openParens == 0 && openBrackets == 0) {
-                                setDialogState(() {
-                                  validationResult = "✅ Símbolos balanceados ({}, (), []). Sintaxis correcta.";
-                                });
-                              } else {
-                                setDialogState(() {
-                                  validationResult = "⚠️ Desbalance: Braces: $openBraces, Parens: $openParens, Brackets: $openBrackets";
-                                });
-                              }
-                            },
-                            icon: const Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.white),
-                            label: const Text("Validar Sintaxis", style: TextStyle(color: Colors.white, fontSize: 11)),
-                          ),
-                        ],
-                      ),
-                      if (validationResult.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          validationResult,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: validationResult.startsWith("✅") ? Colors.greenAccent : Colors.orangeAccent,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text("Cerrar", style: TextStyle(color: theme.subtitleColor)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: theme.primaryColor),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    if (codeController.text.isNotEmpty) {
-                      _chatController.text = "```\n${codeController.text}\n```\nRevisa este fragmento de código.";
-                    }
-                  },
-                  child: const Text("Inyectar en Chat", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // TOOL 4: Optimizador de Memoria
-  Future<void> _ejecutarOptimizadorMemoria() async {
-    final result = await ZRamMemoryManager.optimizeMemory(true);
-    final freedMb = (result['freedMb'] as double).toStringAsFixed(2);
-    final hardware = await HardwareScanner.scan();
-    final freeRam = (hardware['freeRamGb'] as double).toStringAsFixed(2);
-
-    if (mounted) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          final theme = AppThemeConfig.getTheme(_currentThemeStyle);
-          return AlertDialog(
-            backgroundColor: theme.surfaceColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.borderRadius)),
-            title: Row(
-              children: [
-                const Icon(Icons.bolt_rounded, color: Color(0xFFFF9500)),
-                const SizedBox(width: 8),
-                Text("Optimizador Galaxy Tab RAM", style: TextStyle(color: theme.textColor, fontSize: 16)),
-              ],
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("¡Optimización de memoria ejecutada con éxito!"),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.backgroundColor,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: theme.borderColor),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text("Caché Eliminada:", style: TextStyle(fontSize: 12, color: Colors.white70)),
-                          Text("$freedMb MB", style: const TextStyle(fontSize: 12, color: Color(0xFFFF9500), fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text("RAM Libre en Galaxy Tab:", style: TextStyle(fontSize: 12, color: Colors.white70)),
-                          Text("$freeRam GB", style: const TextStyle(fontSize: 12, color: Color(0xFF00B4D8), fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9500)),
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Aceptar", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-              ),
-            ],
-          );
-        },
-      );
-    }
-  }
-  Color _getModeAccentColor(AppThemeData theme) {
-    if (_customAccentColor != null) return _customAccentColor!;
-    return _currentMode == CoreMode.estudiante
-        ? const Color(0xFF9D4EDD)
-        : theme.primaryColor;
-  }
-
-  IconData _getModeSendIcon() {
-    return _currentMode == CoreMode.estudiante
-        ? Icons.school_rounded
-        : Icons.arrow_upward_rounded;
-  }
-
-  void _mostrarModalPersonalizarFondoColores() {
-    final theme = AppThemeConfig.getTheme(_currentThemeStyle);
-    final List<Color> sampleColors = [
-      const Color(0xFF00B4D8), // Cían Cyber
-      const Color(0xFF9D4EDD), // Púrpura Neón
-      const Color(0xFF2ECC71), // Verde Esmeralda
-      const Color(0xFFFF9500), // Ámbar Dorado
-      const Color(0xFFFF0055), // Rojo Carmesí
-      const Color(0xFFFF007F), // Rosa Y2K
-    ];
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: theme.surfaceColor,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.borderRadius)),
-              title: Row(
-                children: [
-                  Icon(Icons.wallpaper_rounded, color: _getModeAccentColor(theme)),
-                  const SizedBox(width: 8),
-                  Text("Personalizar Fondo y Colores", style: TextStyle(color: theme.textColor, fontSize: 16)),
-                ],
-              ),
-              content: SizedBox(
-                width: 440,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("1. Color de Acento Personalizado", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          ...sampleColors.map((color) {
-                            final isSelected = _customAccentColor?.toARGB32() == color.toARGB32();
-                            return InkWell(
-                              onTap: () async {
-                                await AppSettings.saveCustomAccentColor(color.toARGB32());
-                                setDialogState(() {
-                                  _customAccentColor = color;
-                                });
-                                setState(() {});
-                              },
-                              borderRadius: BorderRadius.circular(20),
-                              child: Container(
-                                width: 38,
-                                height: 38,
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: isSelected ? Colors.white : Colors.transparent,
-                                    width: 2.5,
-                                  ),
-                                  boxShadow: isSelected
-                                      ? [BoxShadow(color: color.withValues(alpha: 0.8), blurRadius: 10)]
-                                      : [],
-                                ),
-                                child: isSelected ? const Icon(Icons.check, color: Colors.black, size: 20) : null,
-                              ),
-                            );
-                          }),
-                          InkWell(
-                            onTap: () async {
-                              await AppSettings.saveCustomAccentColor(null);
-                              setDialogState(() {
-                                _customAccentColor = null;
-                              });
-                              setState(() {});
-                            },
-                            borderRadius: BorderRadius.circular(20),
-                            child: Container(
-                              width: 38,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                color: theme.cardColor,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: theme.borderColor),
-                              ),
-                              child: const Icon(Icons.refresh_rounded, color: Colors.white70, size: 18),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                      Text("2. Imagen de Fondo Personalizada", style: TextStyle(color: theme.textColor, fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 10),
-                      if (_customBgImagePath != null && _customBgImagePath!.isNotEmpty) ...[
-                        Row(
-                          children: [
-                            const Icon(Icons.image_rounded, color: Colors.greenAccent, size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _customBgImagePath!.split('/').last,
-                                style: TextStyle(color: theme.subtitleColor, fontSize: 11),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close_rounded, color: Colors.redAccent, size: 18),
-                              onPressed: () async {
-                                await AppSettings.saveCustomBgImagePath(null);
-                                setDialogState(() {
-                                  _customBgImagePath = null;
-                                });
-                                setState(() {});
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.cardColor,
-                          foregroundColor: theme.textColor,
-                          minimumSize: const Size(double.infinity, 44),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            side: BorderSide(color: theme.borderColor),
-                          ),
-                        ),
-                        onPressed: () async {
-                          final result = await FilePicker.platform.pickFiles(
-                            type: FileType.image,
-                          );
-                          if (result != null && result.files.isNotEmpty && result.files.first.path != null) {
-                            final path = result.files.first.path!;
-                            await AppSettings.saveCustomBgImagePath(path);
-                            setDialogState(() {
-                              _customBgImagePath = path;
-                            });
-                            setState(() {});
-                          }
-                        },
-                        icon: Icon(Icons.upload_file_rounded, size: 18, color: _getModeAccentColor(theme)),
-                        label: const Text("Cargar Imagen de Fondo (.png/.jpg)", style: TextStyle(fontSize: 12)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: _getModeAccentColor(theme)),
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Guardar", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // --- COMPONENTES VISUALES Y HEADER ---
+  // --- ESTRUCTURA PRINCIPAL BUILD ---
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeConfig.getTheme(_currentThemeStyle);
     final mediaQuery = MediaQuery.of(context);
     final isLandscapeScreen = mediaQuery.orientation == Orientation.landscape;
-    final isWideScreen = mediaQuery.size.width >= 600;
+    final isWideScreen = mediaQuery.size.width >= 640;
     final shouldShowDrawer = !isLandscapeScreen && !isWideScreen;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: theme.backgroundColor,
+      backgroundColor: const Color(0xFF08090C),
       drawer: shouldShowDrawer
           ? Drawer(
-              backgroundColor: theme.surfaceColor,
+              backgroundColor: const Color(0xFF141721),
               child: SafeArea(
                 child: _buildSidebarContent(theme, isLandscape: false, isDrawer: true),
               ),
@@ -1351,56 +1448,51 @@ class _VantablackHomeState extends State<VantablackHome> {
         customBgImagePath: _customBgImagePath,
         child: RepaintBoundary(
           key: _repaintBoundaryKey,
-          child: Container(
-            decoration: BoxDecoration(gradient: theme.backgroundGradient),
-            child: SafeArea(
-              child: OrientationBuilder(
-                builder: (context, orientation) {
-                  final isLandscape = orientation == Orientation.landscape;
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      final useTwoColumns = isLandscape || constraints.maxWidth >= 600;
+          child: SafeArea(
+            child: OrientationBuilder(
+              builder: (context, orientation) {
+                final isLandscape = orientation == Orientation.landscape;
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final useTwoColumns = isLandscape || constraints.maxWidth >= 640;
 
-                      if (useTwoColumns) {
-                        final sidebarWidth = isLandscape
-                            ? (constraints.maxWidth * 0.28).clamp(230.0, 270.0)
-                            : 270.0;
+                    if (useTwoColumns) {
+                      const sidebarWidth = 260.0;
 
-                        return Row(
-                          children: [
-                            // BARRA LATERAL NATIVA (SCROLLABLE)
-                            Container(
-                              width: sidebarWidth,
-                              decoration: BoxDecoration(
-                                color: theme.surfaceColor,
-                                border: Border(right: BorderSide(color: theme.borderColor, width: 0.8)),
-                              ),
-                              child: _buildSidebarContent(theme, isLandscape: isLandscape),
+                      return Row(
+                        children: [
+                          // BARRA LATERAL NATIVA TRANSLÚCIDA ESTILO CHATGPT
+                          Container(
+                            width: sidebarWidth,
+                            decoration: const BoxDecoration(
+                              color: Color(0xDE141721),
+                              border: Border(right: BorderSide(color: Color(0xFF232738), width: 0.8)),
                             ),
-                            // NÚCLEO DEL CHAT (EXPANDED LISTVIEW CON MÁXIMA PRIORIDAD)
-                            Expanded(
-                              child: _buildChatArea(
-                                theme,
-                                isLandscape: isLandscape,
-                                showMenuButton: false,
-                                constraints: constraints,
-                              ),
+                            child: _buildSidebarContent(theme, isLandscape: isLandscape),
+                          ),
+                          // ÁREA DE CHAT PRINCIPAL
+                          Expanded(
+                            child: _buildChatArea(
+                              theme,
+                              isLandscape: isLandscape,
+                              showMenuButton: false,
+                              constraints: constraints,
                             ),
-                          ],
-                        );
-                      }
-
-                      // MODO RETRATO EN PANTALLA ESTRECHA (DRAWER DISPONIBLE)
-                      return _buildChatArea(
-                        theme,
-                        isLandscape: false,
-                        showMenuButton: true,
-                        constraints: constraints,
+                          ),
+                        ],
                       );
-                    },
-                  );
-                },
-              ),
+                    }
+
+                    // MODO MÓVIL RETRATO
+                    return _buildChatArea(
+                      theme,
+                      isLandscape: false,
+                      showMenuButton: true,
+                      constraints: constraints,
+                    );
+                  },
+                );
+              },
             ),
           ),
         ),
@@ -1408,111 +1500,110 @@ class _VantablackHomeState extends State<VantablackHome> {
     );
   }
 
+  // --- BARRA LATERAL MINIMALISTA ESTILO CHATGPT ---
   Widget _buildSidebarContent(AppThemeData theme, {required bool isLandscape, bool isDrawer = false}) {
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(height: isLandscape ? 12 : 28),
-          
-          Center(
-            child: GestureDetector(
-              onTap: _ejecutarActualizacionOTA,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 400),
-                width: isLandscape ? 64 : 110,
-                height: isLandscape ? 64 : 110, 
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(theme.borderRadius),
-                  boxShadow: theme.shadows,
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(theme.borderRadius),
-                  child: Image.asset(
-                    'assets/logo.png',
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        color: theme.cardColor,
-                        child: Icon(
-                          Icons.shield_rounded,
-                          color: theme.primaryColor,
-                          size: isLandscape ? 28 : 36,
-                        ),
-                      );
-                    },
+          // Logo & Título superior
+          Row(
+            children: [
+              KaiAvatarView(
+                emotion: _currentKaiEmotion,
+                size: 26,
+                theme: theme,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "KAI ASSISTANT",
+                  style: TextStyle(
+                    color: theme.textColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12.5,
+                    letterSpacing: 1.2,
                   ),
                 ),
               ),
-            ),
+              if (isDrawer)
+                AppleGlassIconButton(
+                  icon: CupertinoIcons.xmark,
+                  size: 28,
+                  iconSize: 13,
+                  borderRadius: 10,
+                  tooltip: "Cerrar",
+                  onTap: () => Navigator.of(context).pop(),
+                ),
+            ],
           ),
-          
-          SizedBox(height: isLandscape ? 8 : 14),
+          const SizedBox(height: 14),
 
-          _buildHardwareTelemetryCard(theme, isLandscape: isLandscape),
-          
-          _buildContinuousLearningCard(theme, isLandscape: isLandscape),
-          
-          SizedBox(height: isLandscape ? 6 : 10),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: isLandscape ? 10 : 14),
+          // Botón + Nuevo Chat con cápsula Apple Glass
+          AppleGlassCapsuleButton(
+            icon: CupertinoIcons.add,
+            label: "Nuevo Chat",
+            primaryColor: theme.primaryColor,
+            onTap: () {
+              if (isDrawer) Navigator.of(context).pop();
+              _crearNuevaInstanciaLocal(_activeThread.iaModel);
+            },
+          ),
+          const SizedBox(height: 10),
+
+          // Botón de Gestión de Modelos GGUF con píldora de vidrio
+          AppleGlassPill(
+            borderRadius: 14,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            onTap: () {
+              if (isDrawer) Navigator.of(context).pop();
+              _mostrarModalModelos();
+            },
             child: Row(
               children: [
-                Expanded(
-                  child: _buildLiquidGlassButton(
-                    theme: theme,
-                    title: "Modo Normal",
-                    icon: Icons.bolt_rounded,
-                    isSelected: _currentMode == CoreMode.normal,
-                    activeColor: theme.primaryColor,
-                    isLandscape: isLandscape,
-                    onTap: () => setState(() => _currentMode = CoreMode.normal),
-                  ),
-                ),
+                Icon(Icons.cloud_download_rounded, color: theme.primaryColor, size: 16),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _buildLiquidGlassButton(
-                    theme: theme,
-                    title: "Estudiante",
-                    icon: Icons.menu_book_rounded,
-                    isSelected: _currentMode == CoreMode.estudiante,
-                    activeColor: theme.secondaryColor,
-                    isLandscape: isLandscape,
-                    onTap: () => setState(() => _currentMode = CoreMode.estudiante),
+                  child: Text(
+                    "Modelos GGUF",
+                    style: TextStyle(color: theme.textColor, fontSize: 11.5, fontWeight: FontWeight.w500),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.primaryColor.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: theme.primaryColor.withValues(alpha: 0.35), width: 0.8),
+                  ),
+                  child: Text(
+                    "${_modelosDisponibles.where((m) => m.isDownloaded).length}/3",
+                    style: TextStyle(color: theme.primaryColor, fontSize: 9.5, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
             ),
           ),
-          
-          SizedBox(height: isLandscape ? 8 : 14),
+          const SizedBox(height: 16),
+
+          // Header de sección de chats
           Padding(
-            padding: EdgeInsets.symmetric(horizontal: isLandscape ? 10 : 16),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: theme.cardColor,
-                foregroundColor: theme.textColor,
-                minimumSize: Size(double.infinity, isLandscape ? 36 : 44),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(theme.borderRadius),
-                  side: BorderSide(color: theme.borderColor),
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              "CHATS RECIENTES",
+              style: TextStyle(
+                fontSize: 9.5,
+                color: theme.subtitleColor,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.8,
               ),
-              onPressed: () {
-                if (isDrawer) Navigator.of(context).pop();
-                _mostrarSelectorNuevoChat();
-              },
-              icon: Icon(Icons.add_rounded, size: 18, color: theme.primaryColor),
-              label: const Text("Nueva Instancia", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
             ),
           ),
-          SizedBox(height: isLandscape ? 8 : 14),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: isLandscape ? 14 : 20),
-            child: Text("MATRICES LOCALES ACTIVAS", style: TextStyle(fontSize: 9, color: theme.subtitleColor, fontWeight: FontWeight.bold)),
-          ),
           const SizedBox(height: 6),
+
+          // Lista de threads limpios estilo Apple Glass
           ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -1520,727 +1611,716 @@ class _VantablackHomeState extends State<VantablackHome> {
             itemBuilder: (context, index) {
               final thread = _threads[index];
               final isSelected = thread.id == _activeThreadId;
+
               return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                child: Material(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                  child: ListTile(
-                    dense: true,
-                    visualDensity: isLandscape ? const VisualDensity(horizontal: 0, vertical: -2) : VisualDensity.compact,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    selected: isSelected,
-                    selectedTileColor: theme.cardColor,
-                    leading: Icon(Icons.code_rounded, size: 16, color: isSelected ? theme.primaryColor : theme.subtitleColor),
-                    title: Text(
-                      thread.title,
-                      style: TextStyle(color: isSelected ? theme.textColor : theme.subtitleColor, fontSize: isLandscape ? 11.5 : 12.5),
-                    ),
-                    onTap: () {
-                      setState(() {
-                        _activeThreadId = thread.id;
-                      });
-                      if (isDrawer) Navigator.of(context).pop();
-                    },
+                padding: const EdgeInsets.symmetric(vertical: 2.5),
+                child: AppleGlassPill(
+                  borderRadius: 12,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  backgroundColor: isSelected
+                      ? theme.primaryColor.withValues(alpha: 0.16)
+                      : const Color(0xFF161822).withValues(alpha: 0.40),
+                  borderColor: isSelected
+                      ? theme.primaryColor.withValues(alpha: 0.55)
+                      : Colors.white.withValues(alpha: 0.08),
+                  onTap: () {
+                    setState(() => _activeThreadId = thread.id);
+                    if (isDrawer) Navigator.of(context).pop();
+                  },
+                  child: Row(
+                    children: [
+                      Icon(
+                        CupertinoIcons.chat_bubble_2,
+                        size: 14,
+                        color: isSelected ? theme.primaryColor : theme.subtitleColor,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          thread.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isSelected ? theme.textColor : theme.subtitleColor,
+                            fontSize: 12,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                      if (_threads.length > 1)
+                        AppleGlassIconButton(
+                          icon: CupertinoIcons.trash,
+                          size: 22,
+                          iconSize: 12,
+                          borderRadius: 8,
+                          isDestructive: true,
+                          tooltip: "Borrar chat",
+                          onTap: () => _borrarThread(thread.id),
+                        ),
+                    ],
                   ),
                 ),
               );
             },
           ),
+          const SizedBox(height: 16),
 
-          if (_descargandoOta)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("Descargando actualización...", style: TextStyle(fontSize: 9, color: Colors.amber)),
-                  const SizedBox(height: 4),
-                  LinearProgressIndicator(value: _progresoOta, color: const Color(0xFFFF9500), minHeight: 2),
-                ],
-              ),
+          // Footer: Ajustes & Telemetría y perfil de usuario
+          const Divider(height: 1, color: Color(0xFF26293B)),
+          const SizedBox(height: 10),
+
+          AppleGlassPill(
+            borderRadius: 14,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            onTap: () {
+              if (isDrawer) Navigator.of(context).pop();
+              _mostrarModalAjustesTelemetria();
+            },
+            child: Row(
+              children: [
+                Icon(CupertinoIcons.slider_horizontal_3, size: 16, color: theme.primaryColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "Ajustes & Telemetría",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: theme.textColor, fontSize: 11.5),
+                  ),
+                ),
+                Icon(CupertinoIcons.chevron_right, size: 14, color: theme.subtitleColor),
+              ],
             ),
-          if (_descargandoModelo)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("Descargando pesos de IA...", style: TextStyle(fontSize: 9, color: theme.primaryColor)),
-                  const SizedBox(height: 4),
-                  LinearProgressIndicator(value: _progresoModelo, color: theme.primaryColor, minHeight: 2),
-                ],
+          ),
+          const SizedBox(height: 8),
+
+          // Perfil de usuario compacto
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 12,
+                backgroundColor: theme.primaryColor.withValues(alpha: 0.2),
+                child: Text(widget.username.isNotEmpty ? widget.username[0].toUpperCase() : "U", style: TextStyle(fontSize: 10, color: theme.primaryColor, fontWeight: FontWeight.bold)),
               ),
-            ),
-          Padding(
-            padding: EdgeInsets.all(isLandscape ? 10 : 16),
-            child: Text("User: ${widget.username} | V$_versionHub", style: TextStyle(fontSize: 9, color: theme.subtitleColor, fontFamily: 'monospace')),
-          )
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  widget.username,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: theme.textColor, fontSize: 11.5, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color(0xFF2ECC71),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
+  // --- HEADER SUPERIOR TRANSPARENTE MINIMALISTA APPLE GLASS ---
+  Widget _buildHeader(AppThemeData theme, {required bool isLandscape, required bool showMenuButton}) {
+    final activeModelName = _getNomModel(_activeThread.iaModel);
+
+    return LayoutBuilder(
+      builder: (context, headerConstraints) {
+        final isCompact = headerConstraints.maxWidth < 440;
+
+        return Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: isLandscape ? 12 : 10,
+            vertical: isLandscape ? 4 : 5,
+          ),
+          decoration: const BoxDecoration(
+            color: Colors.transparent,
+          ),
+          child: Row(
+            children: [
+              if (showMenuButton) ...[
+                Builder(
+                  builder: (scaffoldContext) => AppleGlassIconButton(
+                    icon: Icons.menu_rounded,
+                    size: 32,
+                    iconSize: 17,
+                    borderRadius: 10,
+                    tooltip: "Menú lateral",
+                    onTap: () => Scaffold.of(scaffoldContext).openDrawer(),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+
+              // Chip Selector de Modelo Central con Dropdown Apple Glass
+              Flexible(
+                child: AppleGlassPill(
+                  borderRadius: 14,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  onTap: _mostrarModalModelos,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.memory_rounded, size: 13, color: theme.primaryColor),
+                      const SizedBox(width: 4),
+                      if (_isEngineInitializing) ...[
+                        SizedBox(
+                          width: 9,
+                          height: 9,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color: theme.primaryColor,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Flexible(
+                        child: Text(
+                          activeModelName,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: theme.textColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(CupertinoIcons.chevron_down, size: 10, color: theme.subtitleColor),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // Switch de Modos Apple Glass (Segmented Control completo en amplio, botón táctil en compacto)
+              if (!isCompact)
+                AppleGlassSegmentedControl<CoreMode>(
+                  selectedValue: _currentMode,
+                  height: 30,
+                  activeColor: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
+                  onValueChanged: (mode) => setState(() => _currentMode = mode),
+                  children: const {
+                    CoreMode.normal: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.bolt_rounded, size: 12),
+                        SizedBox(width: 3),
+                        Text("Normal"),
+                      ],
+                    ),
+                    CoreMode.estudiante: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.school_rounded, size: 12),
+                        SizedBox(width: 3),
+                        Text("Estudiante"),
+                      ],
+                    ),
+                  },
+                )
+              else
+                AppleGlassIconButton(
+                  icon: _currentMode == CoreMode.estudiante ? Icons.school_rounded : Icons.bolt_rounded,
+                  size: 32,
+                  iconSize: 15,
+                  borderRadius: 10,
+                  isActive: true,
+                  activeGlowColor: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
+                  iconColor: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
+                  tooltip: _currentMode == CoreMode.estudiante ? "Modo Estudiante" : "Modo Normal",
+                  onTap: () {
+                    setState(() {
+                      _currentMode = _currentMode == CoreMode.normal ? CoreMode.estudiante : CoreMode.normal;
+                    });
+                  },
+                ),
+              const SizedBox(width: 4),
+
+              // Botón Modo Live (Voz Continua) Apple Glass
+              AppleGlassIconButton(
+                icon: Icons.graphic_eq_rounded,
+                size: 32,
+                iconSize: 16,
+                borderRadius: 10,
+                isActive: true,
+                activeGlowColor: const Color(0xFF00E5FF),
+                tooltip: "Modo Live (Voz Continua)",
+                onTap: () {
+                  Navigator.of(context).push(
+                    CupertinoPageRoute(
+                      builder: (context) => LiveModeScreen(
+                        username: widget.username,
+                        currentTheme: _currentThemeStyle,
+                        initialMode: _currentMode,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 4),
+
+              // Botón TTS Apple Glass
+              AppleGlassIconButton(
+                icon: KaiTtsService.instance.isEnabled ? CupertinoIcons.speaker_2_fill : CupertinoIcons.speaker_slash_fill,
+                size: 32,
+                iconSize: 15,
+                borderRadius: 10,
+                isActive: KaiTtsService.instance.isEnabled,
+                activeGlowColor: const Color(0xFF00E5FF),
+                tooltip: "Voz de Kai",
+                onTap: () {
+                  setState(() {
+                    KaiTtsService.instance.toggleEnabled();
+                  });
+                },
+              ),
+              const SizedBox(width: 4),
+
+              // Selector de temas Apple Glass
+              AppleGlassIconButton(
+                icon: CupertinoIcons.paintbrush,
+                size: 32,
+                iconSize: 15,
+                borderRadius: 10,
+                tooltip: "Tema visual",
+                onTap: () {
+                  mostrarSelectorTemasModal(
+                    context,
+                    _currentThemeStyle,
+                    (newTheme) {
+                      setState(() => _currentThemeStyle = newTheme);
+                      widget.onThemeChanged(newTheme);
+                    },
+                  );
+                },
+              ),
+              const SizedBox(width: 4),
+
+              // Avatar de Kai
+              GestureDetector(
+                onTap: () => _mostrarModalKaiStatus(context),
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: _currentKaiEmotion.moodColor.withValues(alpha: 0.25),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                  child: KaiAvatarView(
+                    emotion: _currentKaiEmotion,
+                    isThinking: _isGenerating,
+                    size: 26,
+                    theme: theme,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // --- ÁREA DE CHAT & HERO ESTILO CHATGPT ---
   Widget _buildChatArea(
     AppThemeData theme, {
     required bool isLandscape,
     required bool showMenuButton,
     required BoxConstraints constraints,
   }) {
+    final userMessages = _activeThread.messages.where((m) => m["sender"] == "user" || m["sender"] == "assistant").toList();
+    final isEmptyChat = userMessages.isEmpty;
+
     return Column(
       children: [
-        // BARRA SUPERIOR CON SELECCIONADOR DE TEMA
-        Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: isLandscape ? 12 : 16,
-            vertical: isLandscape ? 6 : 10,
-          ),
-          decoration: BoxDecoration(
-            color: theme.surfaceColor,
-            border: Border(bottom: BorderSide(color: theme.borderColor, width: 0.8)),
-          ),
-          child: Row(
-            children: [
-              if (showMenuButton) ...[
-                Builder(
-                  builder: (scaffoldContext) => IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    icon: Icon(Icons.menu_rounded, color: theme.primaryColor, size: 20),
-                    tooltip: "Abrir Menú Lateral",
-                    onPressed: () => Scaffold.of(scaffoldContext).openDrawer(),
-                  ),
+        _buildHeader(theme, isLandscape: isLandscape, showMenuButton: showMenuButton),
+
+        Expanded(
+          child: isEmptyChat
+              ? _buildEmptyChatHero(theme, isLandscape)
+              : ListView.builder(
+                  controller: _scrollController,
+                  physics: const BouncingScrollPhysics(),
+                  padding: EdgeInsets.symmetric(horizontal: isLandscape ? 20 : 16, vertical: 12),
+                  itemCount: _activeThread.messages.length,
+                  itemBuilder: (context, index) {
+                    final msg = _activeThread.messages[index];
+                    if (msg["sender"] == "system") return const SizedBox.shrink();
+                    final isLast = index == _activeThread.messages.length - 1;
+                    return _buildChatMessageBubble(msg, theme, constraints, isLandscape, isLast: isLast);
+                  },
                 ),
-                const SizedBox(width: 4),
-              ],
-              Expanded(
-                child: Text(
-                  _activeThread.title,
-                  style: TextStyle(
-                    fontSize: isLandscape ? 13.5 : 14.5,
-                    fontWeight: FontWeight.bold,
-                    color: theme.textColor,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+        ),
+
+        _buildFloatingInputBar(theme, isLandscape),
+      ],
+    );
+  }
+
+  // --- HERO DE BIENVENIDA CUANDO EL CHAT ESTÁ VACÍO ---
+  Widget _buildEmptyChatHero(AppThemeData theme, bool isLandscape) {
+    return Center(
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            KaiAvatarView(
+              emotion: _currentKaiEmotion,
+              size: isLandscape ? 60 : 72,
+              isThinking: _isGenerating,
+              theme: theme,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "¿En qué puedo ayudarte hoy, ${widget.username}?",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: isLandscape ? 17 : 20,
+                fontWeight: FontWeight.w600,
+                color: theme.textColor,
+                letterSpacing: 0.5,
               ),
-              const SizedBox(width: 6),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "Asistente técnico local • Inferencia 100% en dispositivo",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11.5, color: theme.subtitleColor),
+            ),
+            if (_isEngineInitializing) ...[
+              const SizedBox(height: 10),
               Row(
                 mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 10,
+                    height: 10,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: theme.primaryColor,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    "Iniciando motor...",
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: theme.primaryColor.withValues(alpha: 0.85),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 20),
+
+            // Tarjetas de sugerencia Apple Glass
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                _buildSuggestionPill("⚡ Crear un script en Flutter", theme),
+                _buildSuggestionPill("🧠 Explicar arquitectura MVVM", theme),
+                _buildSuggestionPill("🔍 Optimizar memoria RAM", theme),
+                _buildSuggestionPill("🛠️ Depurar código Dart", theme),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSuggestionPill(String text, AppThemeData theme) {
+    return AppleGlassPill(
+      borderRadius: 16,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      onTap: _isGenerating ? null : () => _procesarMensajeLocal(text.substring(2).trim()),
+      child: Text(text, style: TextStyle(color: theme.textColor, fontSize: 11.5, fontWeight: FontWeight.w500)),
+    );
+  }
+
+  // --- BURBUJAS DE MENSAJES ESTILO CHATGPT ---
+  Widget _buildChatMessageBubble(
+    Map<String, dynamic> msg,
+    AppThemeData theme,
+    BoxConstraints constraints,
+    bool isLandscape, {
+    bool isLast = false,
+  }) {
+    final sender = msg["sender"];
+    final rawText = msg["text"] ?? '';
+    final cleanText = KaiPersona.cleanEmotionTags(rawText);
+
+    if (sender == "user") {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          constraints: BoxConstraints(maxWidth: constraints.maxWidth * (isLandscape ? 0.65 : 0.82)),
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: const BoxDecoration(
+            color: Color(0xFF2A2B32),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(18),
+              topRight: Radius.circular(18),
+              bottomLeft: Radius.circular(18),
+              bottomRight: Radius.circular(4),
+            ),
+          ),
+          child: SelectableText(
+            cleanText,
+            style: const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.4),
+          ),
+        ),
+      );
+    }
+
+    // Mensaje de Kai (Asistente)
+    // 1. OPTIMIZACIÓN DE RENDERIZADO:
+    // Si la IA está generando y este es el último mensaje en streaming,
+    // se suscribe al ValueNotifier de modo que SOLO esta burbuja se reconstruya por token.
+    final bool isStreamingActive = _isGenerating && isLast;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          KaiAvatarView(
+            emotion: _currentKaiEmotion,
+            size: 26,
+            theme: theme,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: isStreamingActive
+                ? ValueListenableBuilder<String>(
+                    valueListenable: _currentStreamingMessage,
+                    builder: (context, streamingVal, _) {
+                      final displayText = streamingVal.isNotEmpty ? streamingVal : (cleanText.isNotEmpty ? cleanText : "...");
+                      final cleanStreaming = KaiPersona.cleanEmotionTags(displayText);
+                      return _buildFormattedAssistantContent(cleanStreaming, theme);
+                    },
+                  )
+                : _buildFormattedAssistantContent(cleanText, theme),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFormattedAssistantContent(String text, AppThemeData theme) {
+    // Si contiene bloques de código ```dart ... ```
+    if (text.contains('```')) {
+      final parts = text.split('```');
+      final List<Widget> children = [];
+
+      for (int i = 0; i < parts.length; i++) {
+        if (i % 2 == 0) {
+          // Texto normal
+          if (parts[i].trim().isNotEmpty) {
+            children.add(
+              SelectableText(
+                parts[i].trim(),
+                style: TextStyle(color: theme.textColor, fontSize: 13.5, height: 1.45),
+              ),
+            );
+          }
+        } else {
+          // Bloque de código
+          final codeBlock = parts[i];
+          final lines = codeBlock.split('\n');
+          final lang = lines.isNotEmpty && lines.first.trim().isNotEmpty ? lines.first.trim() : "code";
+          final codeContent = lines.length > 1 ? lines.sublist(1).join('\n') : codeBlock;
+
+          children.add(
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF13151F),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF282C3F)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Container(
-                    padding: EdgeInsets.symmetric(horizontal: isLandscape ? 6 : 8, vertical: isLandscape ? 2 : 4),
-                    decoration: BoxDecoration(
-                      color: theme.primaryColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: theme.primaryColor.withValues(alpha: 0.25)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1A1C28),
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
                     ),
                     child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Icon(Icons.memory_rounded, size: 11, color: theme.primaryColor),
-                        const SizedBox(width: 4),
-                        Text(
-                          _activeThread.iaModel,
-                          style: TextStyle(
-                            fontSize: isLandscape ? 9.5 : 10.5,
-                            color: theme.primaryColor,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'monospace',
+                        Text(lang.toUpperCase(), style: TextStyle(color: theme.primaryColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                        InkWell(
+                          onTap: () {
+                            Clipboard.setData(ClipboardData(text: codeContent));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Código copiado al portapapeles"), duration: Duration(seconds: 1)),
+                            );
+                          },
+                          child: Row(
+                            children: [
+                              Icon(Icons.copy_rounded, size: 12, color: theme.subtitleColor),
+                              const SizedBox(width: 4),
+                              Text("Copiar", style: TextStyle(color: theme.subtitleColor, fontSize: 10)),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: BoxConstraints(minWidth: isLandscape ? 28 : 32, minHeight: isLandscape ? 28 : 32),
-                    icon: Icon(Icons.wallpaper_rounded, color: _getModeAccentColor(theme), size: isLandscape ? 17 : 19),
-                    tooltip: "Personalizar Fondo y Colores",
-                    onPressed: _mostrarModalPersonalizarFondoColores,
-                  ),
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: BoxConstraints(minWidth: isLandscape ? 28 : 32, minHeight: isLandscape ? 28 : 32),
-                    icon: Icon(Icons.palette_rounded, color: theme.primaryColor, size: isLandscape ? 17 : 19),
-                    tooltip: "Cambiar Tema Visual",
-                    onPressed: () {
-                      mostrarSelectorTemasModal(
-                        context,
-                        _currentThemeStyle,
-                        (newTheme) {
-                          setState(() {
-                            _currentThemeStyle = newTheme;
-                          });
-                          widget.onThemeChanged(newTheme);
-                        },
-                      );
-                    },
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SelectableText(
+                      codeContent.trim(),
+                      style: const TextStyle(
+                        color: Color(0xFFE2E8F0),
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
                   ),
                 ],
               ),
-            ],
-          ),
-        ),
-        
-        // ÁREA DE MENSAJES (EXPANDED LISTVIEW CON MÁXIMA PRIORIDAD)
-        Expanded(
-          child: ListView.builder(
-            controller: _scrollController,
-            padding: EdgeInsets.all(isLandscape ? 12 : 20),
-            itemCount: _activeThread.messages.length,
-            itemBuilder: (context, index) {
-              final msg = _activeThread.messages[index];
-              final sender = msg["sender"];
-              
-              Alignment align = Alignment.centerLeft;
-              BoxDecoration decoration = BoxDecoration(
-                color: theme.surfaceColor,
-                borderRadius: BorderRadius.circular(theme.borderRadius),
-                border: Border.all(color: theme.borderColor),
-                boxShadow: theme.shadows,
-              );
-              TextStyle textStyle = TextStyle(color: theme.textColor, fontSize: isLandscape ? 13 : 14, height: 1.35);
-
-              if (sender == "user") {
-                align = Alignment.centerRight;
-                decoration = BoxDecoration(
-                  color: theme.cardColor,
-                  borderRadius: BorderRadius.circular(theme.borderRadius),
-                  border: Border.all(color: theme.primaryColor.withValues(alpha: 0.4)),
-                );
-              } else if (sender == "system") {
-                align = Alignment.center;
-                decoration = BoxDecoration(
-                  color: theme.primaryColor.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(8),
-                );
-                textStyle = TextStyle(color: theme.primaryColor, fontSize: 11, fontFamily: 'monospace');
-              }
-
-              return Align(
-                alignment: align,
-                child: Container(
-                  constraints: BoxConstraints(maxWidth: constraints.maxWidth * (isLandscape ? 0.60 : 0.78)),
-                  margin: EdgeInsets.symmetric(vertical: isLandscape ? 3 : 4),
-                  padding: EdgeInsets.symmetric(horizontal: isLandscape ? 12 : 16, vertical: isLandscape ? 8 : 12),
-                  decoration: decoration,
-                  child: Text(msg["text"]!, style: textStyle),
-                ),
-              );
-            },
-          ),
-        ),
-        
-        // BARRA INFERIOR DE ENTRADA RESPONSIVA (SIN ALTURAS FIJAS QUE DESBORDEN)
-        Container(
-          padding: EdgeInsets.symmetric(horizontal: isLandscape ? 10 : 14, vertical: isLandscape ? 4 : 8),
-          child: _descargandoModelo 
-              ? Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    LinearProgressIndicator(value: _progresoModelo, color: theme.primaryColor),
-                    SizedBox(height: isLandscape ? 4 : 8),
-                    Text(
-                      "Descargando modelo: ${(_progresoModelo * 100).toStringAsFixed(0)}% completado",
-                      style: TextStyle(fontSize: isLandscape ? 11 : 12, color: theme.subtitleColor),
-                    ),
-                  ],
-                )
-              : !_activeThread.modeloInicializado
-                  ? ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF9500),
-                        foregroundColor: Colors.black,
-                        minimumSize: Size(double.infinity, isLandscape ? 38 : 48),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      onPressed: () => _descargarModeloLlmNativamente(_activeThread),
-                      icon: Icon(Icons.download_rounded, size: isLandscape ? 18 : 22),
-                      label: Text(
-                        "Descargar Modelo Nativamente (${_activeThread.iaModel})",
-                        style: TextStyle(fontSize: isLandscape ? 12 : 14),
-                      ),
-                    )
-                  : Container(
-                      margin: EdgeInsets.only(bottom: isLandscape ? 4 : 8, left: 6, right: 6),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(horizontal: isLandscape ? 12 : 16, vertical: isLandscape ? 6 : 10),
-                        decoration: BoxDecoration(
-                          color: theme.surfaceColor,
-                          borderRadius: BorderRadius.circular(theme.borderRadius),
-                          border: Border.all(color: theme.borderColor, width: 1.2),
-                          boxShadow: theme.shadows,
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            TextField(
-                              controller: _chatController,
-                              minLines: 1,
-                              maxLines: isLandscape ? 3 : 5,
-                              style: TextStyle(color: theme.textColor, fontSize: isLandscape ? 13 : 14, height: 1.35),
-                              onSubmitted: (_) => _procesarMensajeLocal(),
-                              decoration: InputDecoration(
-                                hintText: (_activeThread.pensando || _isGenerating) ? "Procesando matriz nativa..." : "Escribe un mensaje...",
-                                hintStyle: TextStyle(color: theme.subtitleColor, fontSize: isLandscape ? 13 : 14),
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding: EdgeInsets.symmetric(vertical: isLandscape ? 2 : 4),
-                              ),
-                            ),
-                            SizedBox(height: isLandscape ? 6 : 10),
-
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                // BOTÓN TOOLBOX (MALETÍN / HERRAMIENTAS)
-                                InkWell(
-                                  borderRadius: BorderRadius.circular(20),
-                                  onTap: () => _mostrarModalToolbox(context),
-                                  child: Container(
-                                    padding: EdgeInsets.all(isLandscape ? 6 : 8),
-                                    decoration: BoxDecoration(
-                                      color: theme.primaryColor.withValues(alpha: 0.15),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: theme.primaryColor.withValues(alpha: 0.3), width: 1),
-                                    ),
-                                    child: Icon(Icons.work_rounded, color: theme.primaryColor, size: isLandscape ? 17 : 20),
-                                  ),
-                                ),
-
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    GestureDetector(
-                                      onTap: () {
-                                        setState(() {
-                                          _currentMode = _currentMode == CoreMode.normal
-                                              ? CoreMode.estudiante
-                                              : CoreMode.normal;
-                                        });
-                                      },
-                                      child: Container(
-                                        padding: EdgeInsets.symmetric(horizontal: isLandscape ? 8 : 10, vertical: isLandscape ? 3 : 5),
-                                        decoration: BoxDecoration(
-                                          color: _currentMode == CoreMode.estudiante
-                                              ? theme.secondaryColor.withValues(alpha: 0.25)
-                                              : theme.primaryColor.withValues(alpha: 0.2),
-                                          borderRadius: BorderRadius.circular(16),
-                                          border: Border.all(
-                                            color: _currentMode == CoreMode.estudiante
-                                                ? theme.secondaryColor
-                                                : theme.primaryColor,
-                                            width: 1.0,
-                                          ),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              _currentMode == CoreMode.estudiante ? Icons.school_rounded : Icons.bolt_rounded,
-                                              size: isLandscape ? 11 : 13,
-                                              color: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              _currentMode == CoreMode.estudiante ? "Estudiante" : "Local",
-                                              style: TextStyle(
-                                                fontSize: isLandscape ? 10 : 11,
-                                                fontWeight: FontWeight.bold,
-                                                color: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(width: isLandscape ? 6 : 8),
-
-                                    IconButton(
-                                      padding: EdgeInsets.zero,
-                                      constraints: BoxConstraints(minWidth: isLandscape ? 28 : 32, minHeight: isLandscape ? 28 : 32),
-                                      icon: Icon(
-                                        Icons.photo_camera_rounded,
-                                        color: _getModeAccentColor(theme),
-                                        size: isLandscape ? 18 : 20,
-                                      ),
-                                      tooltip: "Tomar Foto con Cámara",
-                                      onPressed: () => _tomarFotoYAnalizarIA(source: ImageSource.camera),
-                                    ),
-                                    const SizedBox(width: 2),
-
-                                    IconButton(
-                                      padding: EdgeInsets.zero,
-                                      constraints: BoxConstraints(minWidth: isLandscape ? 28 : 32, minHeight: isLandscape ? 28 : 32),
-                                      icon: Icon(
-                                        _isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
-                                        color: _isListening ? const Color(0xFFFF0055) : theme.subtitleColor,
-                                        size: isLandscape ? 18 : 20,
-                                      ),
-                                      onPressed: _toggleListening,
-                                    ),
-                                    SizedBox(width: isLandscape ? 4 : 6),
-
-                                    GestureDetector(
-                                      onTap: (_activeThread.pensando || _isGenerating) ? null : () => _procesarMensajeLocal(),
-                                      child: Container(
-                                        width: isLandscape ? 34 : 38,
-                                        height: isLandscape ? 34 : 38,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: _getModeAccentColor(theme),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: _getModeAccentColor(theme).withValues(alpha: 0.5),
-                                              blurRadius: 8,
-                                              offset: const Offset(0, 2),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Center(
-                                          child: (_activeThread.pensando || _isGenerating)
-                                              ? const SizedBox(
-                                                  width: 16,
-                                                  height: 16,
-                                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                                                )
-                                              : Icon(_getModeSendIcon(), color: Colors.black, size: isLandscape ? 17 : 20),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLiquidGlassButton({
-    required AppThemeData theme,
-    required String title,
-    required IconData icon,
-    required bool isSelected,
-    required Color activeColor,
-    required VoidCallback onTap,
-    bool isLandscape = false,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: isLandscape ? 4 : 8, vertical: isLandscape ? 4 : 6),
-        decoration: BoxDecoration(
-          color: isSelected ? activeColor.withValues(alpha: 0.2) : theme.cardColor,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: isSelected ? activeColor : theme.borderColor),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: isLandscape ? 12 : 14, color: isSelected ? activeColor : theme.subtitleColor),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: isLandscape ? 9.5 : 11,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected ? activeColor : theme.subtitleColor,
-                ),
-              ),
             ),
-          ],
-        ),
-      ),
+          );
+        }
+      }
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: children);
+    }
+
+    return SelectableText(
+      text,
+      style: TextStyle(color: theme.textColor, fontSize: 13.5, height: 1.45),
     );
   }
 
-  Widget _buildHardwareTelemetryCard(AppThemeData theme, {bool isLandscape = false}) {
+  // --- BARRA INFERIOR DE ENTRADA ESTILO APPLE GLASS ---
+  Widget _buildFloatingInputBar(AppThemeData theme, bool isLandscape) {
+    final hasText = _chatController.text.trim().isNotEmpty;
+
     return Container(
       margin: EdgeInsets.symmetric(
-        horizontal: isLandscape ? 10 : 14,
-        vertical: isLandscape ? 4 : 10,
+        horizontal: isLandscape ? 18 : 14,
+        vertical: isLandscape ? 6 : 10,
       ),
-      padding: EdgeInsets.all(isLandscape ? 8 : 12),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(theme.borderRadius),
-        border: Border.all(color: theme.borderColor),
+        color: const Color(0xFF1A1C27).withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 1.1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.40),
+            blurRadius: 18,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Icon(Icons.developer_board_rounded, color: theme.primaryColor, size: isLandscape ? 14 : 16),
-              const SizedBox(width: 6),
+              // Botón + Apple Glass
+              AppleGlassIconButton(
+                icon: CupertinoIcons.plus,
+                size: 36,
+                iconSize: 18,
+                borderRadius: 18,
+                iconColor: theme.primaryColor,
+                tooltip: "Herramientas y OCR",
+                onTap: _isGenerating ? null : () => _mostrarModalToolbox(context),
+              ),
+
+              const SizedBox(width: 4),
+
+              // Campo de texto expandible (deshabilitado cuando _isGenerating == true)
               Expanded(
-                child: Text(
-                  "HARDWARE GALAXY TAB",
+                child: TextField(
+                  controller: _chatController,
+                  enabled: !_isGenerating,
+                  minLines: 1,
+                  maxLines: 5,
+                  onChanged: (_) => setState(() {}),
                   style: TextStyle(
-                    color: theme.textColor,
-                    fontSize: isLandscape ? 10 : 11,
-                    fontWeight: FontWeight.bold,
+                    color: _isGenerating ? theme.subtitleColor : theme.textColor,
+                    fontSize: 13.5,
+                    height: 1.35,
                   ),
-                  overflow: TextOverflow.ellipsis,
+                  decoration: InputDecoration(
+                    hintText: (_activeThread.pensando || _isGenerating) ? "Kai está procesando..." : "Pregunta a Kai...",
+                    hintStyle: TextStyle(color: theme.subtitleColor, fontSize: 13.5),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  ),
+                  onSubmitted: (_) => _isGenerating ? null : _procesarMensajeLocal(),
                 ),
+              ),
+
+              const SizedBox(width: 4),
+
+              // Botón Micrófono Apple Glass con onda/glow activo
+              AppleGlassIconButton(
+                icon: _isListening ? CupertinoIcons.mic_fill : CupertinoIcons.mic,
+                size: 36,
+                iconSize: 18,
+                borderRadius: 18,
+                isActive: _isListening,
+                isPulsing: _isListening,
+                activeGlowColor: const Color(0xFFFF3B30),
+                iconColor: _isListening ? const Color(0xFFFF3B30) : theme.subtitleColor,
+                tooltip: _isListening ? "Escuchando..." : "Dictado por voz",
+                onTap: _isGenerating ? null : _toggleListening,
+              ),
+
+              const SizedBox(width: 4),
+
+              // Botón Enviar Apple Glass con aura cian (deshabilitado / onPressed: null mientras genera)
+              AppleGlassIconButton(
+                icon: _isGenerating ? CupertinoIcons.stop_fill : CupertinoIcons.arrow_up,
+                size: 36,
+                iconSize: 18,
+                borderRadius: 18,
+                isActive: !_isGenerating && hasText,
+                activeGlowColor: const Color(0xFF00E5FF),
+                isDestructive: false,
+                isPulsing: false,
+                backgroundColor: !_isGenerating && hasText
+                    ? theme.primaryColor.withValues(alpha: 0.95)
+                    : const Color(0xFF282C3D).withValues(alpha: 0.60),
+                iconColor: !_isGenerating && hasText
+                    ? Colors.black
+                    : const Color(0xFF94A3B8),
+                tooltip: _isGenerating ? "Generando respuesta..." : "Enviar mensaje",
+                onTap: (_isGenerating || !hasText) ? null : () => _procesarMensajeLocal(),
               ),
             ],
           ),
-          SizedBox(height: isLandscape ? 4 : 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(child: Text("Cuerpos CPU:", style: TextStyle(fontSize: 10, color: theme.subtitleColor), overflow: TextOverflow.ellipsis)),
-              Flexible(child: Text("$_cpuCores Hilos", style: TextStyle(fontSize: 10, color: theme.textColor, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(child: Text("RAM Libre:", style: TextStyle(fontSize: 10, color: theme.subtitleColor), overflow: TextOverflow.ellipsis)),
-              Flexible(child: Text("${_freeRamGb.toStringAsFixed(1)} GB / ${_totalRamGb.toStringAsFixed(1)} GB", style: TextStyle(fontSize: isLandscape ? 9.5 : 10, color: theme.primaryColor, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildContinuousLearningCard(AppThemeData theme, {bool isLandscape = false}) {
-    final memory = MemoryService.instance;
-    final isEnabled = memory.isLearningEnabled;
-    final count = memory.memories.length;
-
-    return Container(
-      margin: EdgeInsets.symmetric(
-        horizontal: isLandscape ? 10 : 14,
-        vertical: isLandscape ? 3 : 4,
-      ),
-      padding: EdgeInsets.all(isLandscape ? 8 : 12),
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(theme.borderRadius),
-        border: Border.all(
-          color: isEnabled ? theme.primaryColor.withValues(alpha: 0.5) : theme.borderColor,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.psychology_rounded,
-                      color: isEnabled ? theme.primaryColor : theme.subtitleColor,
-                      size: isLandscape ? 16 : 18,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        "APRENDIZAJE IA",
-                        style: TextStyle(
-                          color: theme.textColor,
-                          fontSize: isLandscape ? 10 : 11,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Transform.scale(
-                scale: isLandscape ? 0.8 : 1.0,
-                child: Switch.adaptive(
-                  value: isEnabled,
-                  activeTrackColor: theme.primaryColor,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  onChanged: (val) async {
-                    await memory.setLearningEnabled(val);
-                    setState(() {});
-                  },
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Text(
-            isEnabled
-                ? "Aprende preferencias de tus chats."
-                : "Aprendizaje pausado.",
-            style: TextStyle(fontSize: isLandscape ? 8.5 : 9.5, color: theme.subtitleColor),
-          ),
-          if (isEnabled) ...[
-            SizedBox(height: isLandscape ? 4 : 8),
-            InkWell(
-              onTap: _mostrarModalMemoriaAprendida,
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: isLandscape ? 8 : 10, vertical: isLandscape ? 4 : 6),
-                decoration: BoxDecoration(
-                  color: theme.primaryColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: theme.primaryColor.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      "Ver Memoria ($count)",
-                      style: TextStyle(
-                        fontSize: isLandscape ? 9.5 : 10.5,
-                        fontWeight: FontWeight.bold,
-                        color: theme.primaryColor,
-                      ),
-                    ),
-                    Icon(Icons.chevron_right_rounded, size: 14, color: theme.primaryColor),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  void _mostrarModalMemoriaAprendida() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final theme = AppThemeConfig.getTheme(_currentThemeStyle);
-            final memories = MemoryService.instance.memories;
-
-            return AlertDialog(
-              backgroundColor: theme.surfaceColor,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.borderRadius)),
-              title: Row(
-                children: [
-                  Icon(Icons.psychology_rounded, color: theme.primaryColor),
-                  const SizedBox(width: 8),
-                  Text("Memoria Aprendida de Chats", style: TextStyle(color: theme.textColor, fontSize: 16)),
-                ],
-              ),
-              content: SizedBox(
-                width: 420,
-                child: memories.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Text(
-                          "La IA aún no ha registrado memorias. Continúa conversando con la IA para que aprenda automáticamente sobre ti y tus preferencias.",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: theme.subtitleColor, fontSize: 13),
-                        ),
-                      )
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            constraints: BoxConstraints(
-                              maxHeight: (MediaQuery.of(context).size.height * 0.45).clamp(150.0, 280.0),
-                            ),
-                            child: ListView.separated(
-                              shrinkWrap: true,
-                              itemCount: memories.length,
-                              separatorBuilder: (_, __) => const Divider(height: 8, color: Colors.white12),
-                              itemBuilder: (context, idx) {
-                                return ListTile(
-                                  dense: true,
-                                  leading: Icon(Icons.bookmark_rounded, size: 16, color: theme.primaryColor),
-                                  title: Text(
-                                    memories[idx],
-                                    style: TextStyle(color: theme.textColor, fontSize: 12),
-                                  ),
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
-                                    onPressed: () async {
-                                      await MemoryService.instance.removeMemoryAt(idx);
-                                      setDialogState(() {});
-                                      setState(() {});
-                                    },
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-              ),
-              actions: [
-                if (memories.isNotEmpty)
-                  TextButton(
-                    onPressed: () async {
-                      await MemoryService.instance.clearMemories();
-                      setDialogState(() {});
-                      setState(() {});
-                    },
-                    child: const Text("Borrar Memoria", style: TextStyle(color: Colors.redAccent, fontSize: 12)),
-                  ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: theme.primaryColor),
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Aceptar", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _mostrarSelectorNuevoChat() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        final theme = AppThemeConfig.getTheme(_currentThemeStyle);
-        return AlertDialog(
-          backgroundColor: theme.surfaceColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(theme.borderRadius)),
-          title: Text("Nueva Instancia de IA Local", style: TextStyle(color: theme.textColor)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: _modelosDisponibles.map((model) {
-                return ListTile(
-                  title: Text(model.name, style: TextStyle(color: theme.textColor, fontSize: 14)),
-                  subtitle: Text("${model.size} | RAM Req: ${model.requiredRamGb}GB", style: TextStyle(color: theme.subtitleColor, fontSize: 11)),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: model.badgeColor.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(model.badge, style: TextStyle(color: model.badgeColor, fontSize: 9, fontWeight: FontWeight.bold)),
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _crearNuevaInstanciaLocal(model.id);
-                  },
-                );
-              }).toList(),
-            ),
-          ),
-        );
-      },
     );
   }
 }

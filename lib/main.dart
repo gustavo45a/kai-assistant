@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 
 import 'models/app_theme.dart';
 import 'services/app_settings.dart';
-import 'ui/screens/onboarding_screen.dart';
-import 'ui/screens/login_screen.dart';
+import 'ui/screens/kai_setup_screen.dart';
+import 'ui/screens/home_screen.dart';
 
 // --- ARRANQUE COMPLETO CON BLINDAJE NATIVO ---
 void main() {
@@ -28,7 +28,7 @@ void main() {
                     Icon(Icons.bug_report_rounded, color: Colors.redAccent, size: 32),
                     SizedBox(width: 8),
                     Text(
-                      "VENTABLACK FATAL ERROR",
+                      "VANTABLACK FATAL ERROR",
                       style: TextStyle(
                         color: Colors.redAccent,
                         fontSize: 18,
@@ -97,7 +97,7 @@ class VantablackApp extends StatefulWidget {
 
 class _VantablackAppState extends State<VantablackApp> {
   bool _isLoading = true;
-  bool _isFirstLaunch = true;
+  bool _hasCompletedOnboarding = false;
   String _username = "Gustavo";
   AppThemeStyle _currentTheme = AppThemeStyle.vantablackGlass;
 
@@ -108,15 +108,17 @@ class _VantablackAppState extends State<VantablackApp> {
   }
 
   Future<void> _loadSettings() async {
-    final firstLaunch = await AppSettings.isFirstLaunch();
+    final completed = await AppSettings.hasCompletedOnboarding();
     final username = await AppSettings.getUsername();
     final theme = await AppSettings.getSavedTheme();
-    setState(() {
-      _isFirstLaunch = firstLaunch;
-      _username = username;
-      _currentTheme = theme;
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _hasCompletedOnboarding = completed;
+        _username = username;
+        _currentTheme = theme;
+        _isLoading = false;
+      });
+    }
   }
 
   void _onThemeChanged(AppThemeStyle newTheme) async {
@@ -126,11 +128,11 @@ class _VantablackAppState extends State<VantablackApp> {
     await AppSettings.saveTheme(newTheme);
   }
 
-  void _onOnboardingComplete(String username, AppThemeStyle theme) {
+  void _onSetupComplete(String username, AppThemeStyle theme) {
     setState(() {
       _username = username;
       _currentTheme = theme;
-      _isFirstLaunch = false;
+      _hasCompletedOnboarding = true;
     });
   }
 
@@ -160,15 +162,15 @@ class _VantablackAppState extends State<VantablackApp> {
           surface: themeData.surfaceColor,
         ),
       ),
-      home: _isFirstLaunch
-          ? OnboardingScreen(
-              initialTheme: _currentTheme,
-              onComplete: _onOnboardingComplete,
-            )
-          : LoginScreen(
+      home: _hasCompletedOnboarding
+          ? VantablackHome(
               username: _username,
               currentTheme: _currentTheme,
               onThemeChanged: _onThemeChanged,
+            )
+          : KaiSetupScreen(
+              initialTheme: _currentTheme,
+              onComplete: _onSetupComplete,
             ),
     );
   }

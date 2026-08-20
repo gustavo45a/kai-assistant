@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.tuproyecto.kai.kai_app" // Actualizado para que coincida con tu app
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "26.1.10909125"
+    ndkVersion = "26.3.11579264"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
