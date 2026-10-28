@@ -3,12 +3,15 @@ import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 
 class ZRamMemoryManager {
-  static Future<Map<String, dynamic>> optimizeMemory(bool isEnabled) async {
+  /// Libera la caché de imágenes. Con [clearTempFiles] también borra la carpeta
+  /// temporal, lo cual puede eliminar fotos/archivos recién elegidos o el APK de OTA.
+  static Future<Map<String, dynamic>> optimizeMemory(bool isEnabled, {bool clearTempFiles = false}) async {
     double freedMb = 0.0;
     if (isEnabled) {
       PaintingBinding.instance.imageCache.clear();
       PaintingBinding.instance.imageCache.clearLiveImages();
-      
+    }
+    if (isEnabled && clearTempFiles) {
       try {
         final tempDir = await getTemporaryDirectory();
         if (await tempDir.exists()) {

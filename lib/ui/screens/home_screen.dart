@@ -51,7 +51,7 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "3.0.0";
+  final String _versionHub = "3.1.0";
   final int _currentBuildNumber = 40;
   final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/docs/vantablack_hub.apk";
   final GlobalKey _repaintBoundaryKey = GlobalKey();
@@ -233,8 +233,8 @@ class _VantablackHomeState extends State<VantablackHome> {
       final dio = Dio();
       final response = await dio.get("https://gustavo45a.github.io/kai-assistant/version.json");
       if (response.statusCode == 200) {
-        final data = response.data;
-        int remoteBuild = data['build_number'] ?? _currentBuildNumber;
+        final data = response.data is String ? jsonDecode(response.data) : response.data;
+        final remoteBuild = (data['buildNumber'] as num?)?.toInt() ?? _currentBuildNumber;
         if (remoteBuild > _currentBuildNumber) {
           _ejecutarActualizacionOTA();
         }
@@ -257,7 +257,7 @@ class _VantablackHomeState extends State<VantablackHome> {
         _urlApkRemoto,
         savePath,
         onReceiveProgress: (received, total) {
-          if (total != -1) {
+          if (total != -1 && mounted) {
             setState(() {
               _progresoOta = received / total;
             });
@@ -265,15 +265,19 @@ class _VantablackHomeState extends State<VantablackHome> {
         },
       );
 
-      setState(() {
-        _descargandoOta = false;
-      });
+      if (mounted) {
+        setState(() {
+          _descargandoOta = false;
+        });
+      }
 
       await OpenFile.open(savePath);
     } catch (e) {
-      setState(() {
-        _descargandoOta = false;
-      });
+      if (mounted) {
+        setState(() {
+          _descargandoOta = false;
+        });
+      }
       if (mounted) {
         _mostrarModalErrorWindowsXP("Fallo al descargar la actualización OTA: $e");
       }
@@ -303,22 +307,27 @@ class _VantablackHomeState extends State<VantablackHome> {
       _progresoModelo = 0.0;
     });
 
+    String? partialPath;
     try {
       final dir = await getApplicationDocumentsDirectory();
       final filePath = "${dir.path}/${targetModel.id}.gguf";
+      partialPath = "$filePath.part";
       final dio = Dio();
 
+      // Descargar a un archivo temporal .part y renombrarlo solo al completar,
+      // para que una descarga interrumpida nunca se detecte como modelo válido.
       await dio.download(
         targetModel.urlGguf,
-        filePath,
+        partialPath,
         onReceiveProgress: (received, total) {
-          if (total != -1) {
+          if (total != -1 && mounted) {
             setState(() {
               _progresoModelo = received / total;
             });
           }
         },
       );
+      await File(partialPath).rename(filePath);
 
       targetModel.isDownloaded = true;
       thread.iaModel = targetModel.id;
@@ -327,9 +336,11 @@ class _VantablackHomeState extends State<VantablackHome> {
       await LocalLLMService.instance.initializeRealModel(filePath, threads: 4);
       thread.modeloInicializado = true;
 
-      setState(() {
-        _descargandoModelo = false;
-      });
+      if (mounted) {
+        setState(() {
+          _descargandoModelo = false;
+        });
+      }
 
       await _guardarDatosEnDisco();
 
@@ -342,10 +353,16 @@ class _VantablackHomeState extends State<VantablackHome> {
         );
       }
     } catch (e) {
-      setState(() {
-        _descargandoModelo = false;
-      });
+      if (partialPath != null) {
+        try {
+          final partialFile = File(partialPath);
+          if (await partialFile.exists()) await partialFile.delete();
+        } catch (_) {}
+      }
       if (mounted) {
+        setState(() {
+          _descargandoModelo = false;
+        });
         _mostrarModalErrorWindowsXP("Error al descargar modelo local: $e");
       }
     }
@@ -475,7 +492,8 @@ class _VantablackHomeState extends State<VantablackHome> {
                 ? MemoryService.instance.memories
                 : <String>[],
           },
-          history: threadActual.messages,
+          // Excluir el mensaje actual del usuario y el placeholder "...": buildChatMLPrompt ya agrega el prompt al final.
+          history: threadActual.messages.sublist(0, threadActual.messages.length - 2),
         );
 
         final responseBuffer = StringBuffer();

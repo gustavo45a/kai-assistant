@@ -39,7 +39,7 @@ class LocalLLMService {
       return;
     }
 
-    ZRamMemoryManager.optimizeMemory(true);
+    await ZRamMemoryManager.optimizeMemory(true);
 
     if (_isModelLoaded) {
       try {
