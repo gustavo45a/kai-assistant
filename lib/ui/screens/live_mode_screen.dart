@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +13,7 @@ import '../../services/local_llm_service.dart';
 import '../../services/kai_tts_service.dart';
 import '../../services/memory_service.dart';
 import '../widgets/apple_glass_icon_button.dart';
+import '../widgets/glass_blur.dart';
 
 /// Estados del ciclo de conversación en tiempo real del Modo Live
 enum LiveModeState {
@@ -700,8 +700,8 @@ class _LiveModeScreenState extends State<LiveModeScreen>
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(20),
-                      child: BackdropFilter(
-                        filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                      child: GlassBlur(
+                        sigma: 16,
                         child: Text(
                           _liveTranscript,
                           textAlign: TextAlign.center,

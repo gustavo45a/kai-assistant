@@ -10,26 +10,24 @@ void main() {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
     });
-    test('Acoustic profiles match Kai emotion specifications', () {
+    test('Acoustic profiles keep subtle, natural variations per emotion', () {
       final happy = KaiTtsService.instance.getProfileForEmotion(KaiEmotion.happy);
-      expect(happy.pitch, 1.28);
-      expect(happy.speechRate, 0.54);
+      expect(happy.pitch, 1.06);
+      expect(happy.speechRate, 0.52);
 
       final thinking = KaiTtsService.instance.getProfileForEmotion(KaiEmotion.thinking);
-      expect(thinking.pitch, 1.12);
+      expect(thinking.pitch, 0.97);
       expect(thinking.speechRate, 0.44);
-
-      final focused = KaiTtsService.instance.getProfileForEmotion(KaiEmotion.focused);
-      expect(focused.pitch, 1.16);
-      expect(focused.speechRate, 0.50);
-
-      final smug = KaiTtsService.instance.getProfileForEmotion(KaiEmotion.smug);
-      expect(smug.pitch, 1.22);
-      expect(smug.speechRate, 0.49);
+      expect(thinking.neuralSpeed, lessThan(1.0));
 
       final neutral = KaiTtsService.instance.getProfileForEmotion(KaiEmotion.neutral);
-      expect(neutral.pitch, 1.20);
-      expect(neutral.speechRate, 0.50);
+      expect(neutral.pitch, 1.00);
+      expect(neutral.neuralSpeed, 1.00);
+
+      for (final profile in KaiTtsService.emotionAcoustics.values) {
+        expect(profile.pitch, inInclusiveRange(0.95, 1.08));
+        expect(profile.neuralSpeed, inInclusiveRange(0.9, 1.1));
+      }
     });
 
     test('sanitizeForTts replaces Markdown code blocks with natural speech phrase', () {
@@ -92,10 +90,25 @@ void main() {
       expect(KaiTtsService.instance.isEnabled, isTrue);
     });
 
-    test('initializeUniqueVoice generates and persists unique pitch in 0.8-1.2 range', () async {
+    test('initializeUniqueVoice persists a subtle per-device pitch in 0.96-1.04 range', () async {
       await KaiTtsService.instance.initializeUniqueVoice();
-      expect(KaiTtsService.instance.uniqueVoicePitch, greaterThanOrEqualTo(0.8));
-      expect(KaiTtsService.instance.uniqueVoicePitch, lessThanOrEqualTo(1.2));
+      expect(KaiTtsService.instance.uniqueVoicePitch, greaterThanOrEqualTo(0.96));
+      expect(KaiTtsService.instance.uniqueVoicePitch, lessThanOrEqualTo(1.04));
+    });
+
+    test('localeForDialect maps onboarding dialects to voice locales', () {
+      expect(KaiTtsService.localeForDialect('Español México'), 'es-MX');
+      expect(KaiTtsService.localeForDialect('Español España'), 'es-ES');
+      expect(KaiTtsService.localeForDialect('Español Argentina'), 'es-AR');
+      expect(KaiTtsService.localeForDialect('Español Neutro Internacional'), 'es-US');
+    });
+
+    test('scoreVoice prefers exact locale, high quality and offline voices', () {
+      final offlineMx = {'name': 'es-mx-x-esc-local', 'locale': 'es-MX', 'quality': '400', 'network_required': '0'};
+      final networkMx = {'name': 'es-mx-x-esc-network', 'locale': 'es-MX', 'quality': '400', 'network_required': '1'};
+      final offlineEs = {'name': 'es-es-x-eee-local', 'locale': 'es-ES', 'quality': '400', 'network_required': '0'};
+      expect(KaiTtsService.scoreVoice(offlineMx, 'es-MX'), greaterThan(KaiTtsService.scoreVoice(networkMx, 'es-MX')));
+      expect(KaiTtsService.scoreVoice(offlineMx, 'es-MX'), greaterThan(KaiTtsService.scoreVoice(offlineEs, 'es-MX')));
     });
   });
 }

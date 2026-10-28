@@ -44,3 +44,8 @@ android/app/.cxx/
 android/build/
 android/app/build/
 android/.gradle/
+
+# Claves de firma (nunca se suben; CI las crea desde los secretos del repo)
+android/key.properties
+*.jks
+*.keystore

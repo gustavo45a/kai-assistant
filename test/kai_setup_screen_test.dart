@@ -20,7 +20,7 @@ void main() {
   });
 
   group('KaiSetupScreen Widget & Flow Tests', () {
-    testWidgets('Renders Step 1 Welcome and navigates through all 5 setup steps', (WidgetTester tester) async {
+    testWidgets('Renders the hello screen and navigates through all 6 setup steps', (WidgetTester tester) async {
       String? completedUser;
       AppThemeStyle? completedTheme;
 
@@ -38,60 +38,46 @@ void main() {
 
       await tester.pump(const Duration(milliseconds: 100));
 
-      // PASO 1: Welcome
+      Future<void> next(String label) async {
+        await tester.tap(find.text(label));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+      }
+
+      // PASO 1: Hola
       expect(find.text("Bienvenido a Kai"), findsOneWidget);
-      expect(find.text("Comenzar Configuración"), findsOneWidget);
+      await next("Comenzar");
 
-      // Tap Comenzar
-      await tester.tap(find.text("Comenzar Configuración"));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
-
-      // PASO 2: Nombre de Usuario
+      // PASO 2: Nombre (Continuar deshabilitado hasta escribir uno)
       expect(find.text("¿Cómo te llamas?"), findsOneWidget);
-      expect(find.text("Continuar"), findsOneWidget);
-
-      // Select chip "Alex"
-      await tester.tap(find.text("Alex"));
-      await tester.pump(const Duration(milliseconds: 100));
-
-      // Tap Continuar
-      await tester.tap(find.text("Continuar"));
+      final continuar = find.widgetWithText(FilledButton, "Continuar");
+      expect(tester.widget<FilledButton>(continuar).onPressed, isNull);
+      await tester.enterText(find.byType(TextField), "Alex");
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
+      expect(tester.widget<FilledButton>(continuar).onPressed, isNotNull);
+      await next("Continuar");
 
       // PASO 3: Dialecto
-      expect(find.text("Selecciona tu Dialecto"), findsOneWidget);
-      expect(find.text("Español México"), findsOneWidget);
-
-      // Tap Español México
+      expect(find.text("¿Cómo hablas?"), findsOneWidget);
       await tester.tap(find.text("Español México"));
       await tester.pump(const Duration(milliseconds: 100));
+      await next("Continuar");
 
-      // Tap Continuar
-      await tester.tap(find.text("Continuar"));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
-
-      // PASO 4: Trato e Identidad
-      expect(find.text("Trato e Identidad"), findsOneWidget);
-      expect(find.text("No binario / Neutro"), findsOneWidget);
-
-      // Tap No binario / Neutro
+      // PASO 4: Trato
+      expect(find.text("¿Cómo prefieres que te trate?"), findsOneWidget);
       await tester.tap(find.text("No binario / Neutro"));
       await tester.pump(const Duration(milliseconds: 100));
+      await next("Continuar");
 
-      // Tap Continuar
-      await tester.tap(find.text("Continuar"));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
+      // PASO 5: Voz (se elige la del sistema para no descargar nada en el test)
+      expect(find.text("Elige la voz de Kai"), findsOneWidget);
+      await tester.tap(find.text("Voz del sistema"));
+      await tester.pump(const Duration(milliseconds: 100));
+      await next("Continuar");
 
-      // PASO 5: Resumen y Activación
-      expect(find.text("¡Todo Listo, Alex!"), findsOneWidget);
-      expect(find.text("⚡ Activar Núcleo de Kai"), findsOneWidget);
-
-      // Tap Activar
-      await tester.tap(find.text("⚡ Activar Núcleo de Kai"));
+      // PASO 6: Listo
+      expect(find.text("Todo listo, Alex"), findsOneWidget);
+      await tester.tap(find.text("Empezar a usar Kai"));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 

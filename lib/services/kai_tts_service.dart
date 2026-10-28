@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/kai_persona.dart';
+import 'app_settings.dart';
+import 'neural_tts_service.dart';
 
 /// Perfil acústico con pitch y velocidad prosódica.
 class KaiAcousticProfile {
@@ -13,23 +15,35 @@ class KaiAcousticProfile {
   final double speechRate;
   final double volume;
 
+  /// Velocidad relativa para la voz neuronal (1.0 = natural).
+  final double neuralSpeed;
+
   const KaiAcousticProfile({
     required this.pitch,
     required this.speechRate,
     this.volume = 1.0,
+    this.neuralSpeed = 1.0,
   });
 }
 
 /// Servicio singleton para la síntesis de voz (TTS) de Kai con modulación
 /// prosódica reactiva a emociones y sanitización inteligente de código.
+///
+/// Usa la voz neuronal offline ([NeuralTtsService]) cuando hay una instalada y
+/// activada; si no, la mejor voz del sistema disponible.
 class KaiTtsService extends ChangeNotifier {
   static final KaiTtsService instance = KaiTtsService._internal();
   KaiTtsService._internal();
+
+  static const String keyVoiceProfile = 'kai_voice_profile';
+  static const String keyUseNeural = 'tts_use_neural';
+  static const int _voiceProfileVersion = 2;
 
   final FlutterTts _flutterTts = FlutterTts();
   bool _isEnabled = true;
   bool _isSpeaking = false;
   bool _isInitialized = false;
+  bool _useNeural = true;
   String? _selectedVoiceName;
   KaiEmotion _lastEmotion = KaiEmotion.neutral;
   double _uniqueVoicePitch = 1.0;
@@ -45,13 +59,27 @@ class KaiTtsService extends ChangeNotifier {
   double get uniqueVoicePitch => _uniqueVoicePitch;
   Map<String, String>? get uniqueVoice => _uniqueVoice;
 
-  /// Modulación acústica oficial para cada emoción de Kai.
+  /// El usuario quiere la voz neuronal cuando esté disponible.
+  bool get useNeural => _useNeural;
+
+  /// Se hablará con la voz neuronal en la próxima locución.
+  bool get isUsingNeural => _useNeural && NeuralTtsService.instance.isReady;
+
+  /// Nombre legible de la voz activa.
+  String get activeVoiceLabel {
+    final neural = NeuralTtsService.instance.selectedVoice;
+    if (isUsingNeural && neural != null) return '${neural.name} (${neural.accent}) · Neuronal';
+    return '${_selectedVoiceName ?? "Voz del sistema"} · Sistema';
+  }
+
+  /// Modulación acústica para cada emoción de Kai. Variaciones sutiles: los
+  /// saltos grandes de tono son los que hacían sonar la voz robótica.
   static const Map<KaiEmotion, KaiAcousticProfile> emotionAcoustics = {
-    KaiEmotion.neutral: KaiAcousticProfile(pitch: 1.20, speechRate: 0.50, volume: 1.0),
-    KaiEmotion.happy: KaiAcousticProfile(pitch: 1.28, speechRate: 0.54, volume: 1.0),
-    KaiEmotion.thinking: KaiAcousticProfile(pitch: 1.12, speechRate: 0.44, volume: 1.0),
-    KaiEmotion.focused: KaiAcousticProfile(pitch: 1.16, speechRate: 0.50, volume: 1.0),
-    KaiEmotion.smug: KaiAcousticProfile(pitch: 1.22, speechRate: 0.49, volume: 1.0),
+    KaiEmotion.neutral: KaiAcousticProfile(pitch: 1.00, speechRate: 0.48, neuralSpeed: 1.00),
+    KaiEmotion.happy: KaiAcousticProfile(pitch: 1.06, speechRate: 0.52, neuralSpeed: 1.06),
+    KaiEmotion.thinking: KaiAcousticProfile(pitch: 0.97, speechRate: 0.44, neuralSpeed: 0.92),
+    KaiEmotion.focused: KaiAcousticProfile(pitch: 1.00, speechRate: 0.47, neuralSpeed: 0.97),
+    KaiEmotion.smug: KaiAcousticProfile(pitch: 1.03, speechRate: 0.47, neuralSpeed: 0.98),
   };
 
   /// Asigna un listener que se dispara al terminar la locución del audio actual
@@ -64,11 +92,14 @@ class KaiTtsService extends ChangeNotifier {
     return emotionAcoustics[emotion] ?? emotionAcoustics[KaiEmotion.neutral]!;
   }
 
-  /// Inicializa el motor TTS, carga la huella de voz única por dispositivo y configura callbacks.
+  /// Inicializa el motor TTS, carga la huella de voz del dispositivo y configura callbacks.
   Future<void> init() async {
     if (_isInitialized) return;
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      _useNeural = prefs.getBool(keyUseNeural) ?? true;
+
       if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         try {
           await _flutterTts.setEngine("com.google.android.tts");
@@ -96,7 +127,6 @@ class KaiTtsService extends ChangeNotifier {
         notifyListeners();
       });
 
-      // 5. HUELLA DE VOZ ÚNICA POR DISPOSITIVO (Voice Fingerprint)
       await _initializeUniqueVoice();
 
       final base = emotionAcoustics[KaiEmotion.neutral]!;
@@ -107,23 +137,65 @@ class KaiTtsService extends ChangeNotifier {
     } catch (e) {
       debugPrint("Error al inicializar KaiTtsService: $e");
     }
+
+    if (!kIsWeb) {
+      unawaited(NeuralTtsService.instance.init());
+    }
   }
 
-  /// 5. Inicializa o recupera la huella de voz persistente en SharedPreferences.
+  Future<void> setUseNeural(bool value) async {
+    _useNeural = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(keyUseNeural, value);
+    notifyListeners();
+  }
+
+  /// Locale de voz según el dialecto elegido en la configuración inicial.
+  static String localeForDialect(String dialect) {
+    final d = dialect.toLowerCase();
+    if (d.contains('méxico') || d.contains('mexico')) return 'es-MX';
+    if (d.contains('españa') || d.contains('espana')) return 'es-ES';
+    if (d.contains('argentina')) return 'es-AR';
+    if (d.contains('colombia')) return 'es-CO';
+    return 'es-US';
+  }
+
+  /// Puntúa una voz del sistema: locale exacto, alta calidad y que funcione sin internet.
+  static int scoreVoice(Map<String, String> voice, String preferredLocale) {
+    final locale = (voice['locale'] ?? '').replaceAll('_', '-').toLowerCase();
+    final name = (voice['name'] ?? '').toLowerCase();
+    var score = 0;
+    if (locale == preferredLocale.toLowerCase()) {
+      score += 40;
+    } else if (locale.startsWith(preferredLocale.toLowerCase().split('-').first)) {
+      score += 10;
+    }
+    final quality = int.tryParse(voice['quality'] ?? '') ?? 0;
+    if (quality >= 400) score += 20;
+    if (quality >= 500) score += 10;
+    if (voice['network_required'] == '1' || voice['network_required'] == 'true' || name.contains('network')) {
+      score -= 30;
+    }
+    if (name.contains('local')) score += 5;
+    return score;
+  }
+
+  /// Inicializa o recupera la voz del sistema elegida para este dispositivo.
   Future<void> _initializeUniqueVoice() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      const String key = 'kai_voice_profile';
-      final String? savedProfileJson = prefs.getString(key);
-
+      final String? savedProfileJson = prefs.getString(keyVoiceProfile);
+      Map<String, dynamic>? saved;
       if (savedProfileJson != null && savedProfileJson.isNotEmpty) {
-        // Si SÍ existe: Cargar y aplicar configuración guardada
-        final Map<String, dynamic> profile = jsonDecode(savedProfileJson);
-        final String? name = profile['name'] as String?;
-        final String locale = profile['locale'] as String? ?? 'es-ES';
-        final double pitch = (profile['pitch'] as num?)?.toDouble() ?? 1.0;
+        saved = jsonDecode(savedProfileJson) as Map<String, dynamic>;
+        // Los perfiles antiguos tenían tonos aleatorios de 0.8–1.2: se recalculan.
+        if (saved['v'] != _voiceProfileVersion) saved = null;
+      }
 
-        _uniqueVoicePitch = pitch;
+      if (saved != null) {
+        final String? name = saved['name'] as String?;
+        final String locale = saved['locale'] as String? ?? 'es-ES';
+        _uniqueVoicePitch = (saved['pitch'] as num?)?.toDouble() ?? 1.0;
         if (name != null) {
           _uniqueVoice = {'name': name, 'locale': locale};
           _selectedVoiceName = name;
@@ -134,64 +206,55 @@ class KaiTtsService extends ChangeNotifier {
         try {
           await _flutterTts.setPitch(_uniqueVoicePitch);
         } catch (_) {}
-      } else {
-        // Si NO existe (primera vez):
-        // a) Obtener lista de voces disponibles en español
-        try {
-          await _flutterTts.setLanguage("es-ES");
-        } catch (_) {}
+        return;
+      }
 
-        final List<Map<String, String>> spanishVoices = [];
-        try {
-          final dynamic rawVoices = await _flutterTts.getVoices;
-          if (rawVoices is List && rawVoices.isNotEmpty) {
-            for (final item in rawVoices) {
-              if (item is Map) {
-                final name = (item['name'] ?? '').toString();
-                final locale = (item['locale'] ?? '').toString().toLowerCase();
-                if (locale.startsWith('es') ||
-                    name.toLowerCase().contains('es-') ||
-                    name.toLowerCase().contains('spanish') ||
-                    name.toLowerCase().contains('español')) {
-                  spanishVoices.add({
-                    'name': name,
-                    'locale': item['locale']?.toString() ?? 'es-ES',
-                  });
-                }
-              }
+      final preferredLocale = localeForDialect(await AppSettings.getDialect());
+      try {
+        await _flutterTts.setLanguage(preferredLocale);
+      } catch (_) {}
+
+      final List<Map<String, String>> spanishVoices = [];
+      try {
+        final dynamic rawVoices = await _flutterTts.getVoices;
+        if (rawVoices is List) {
+          for (final item in rawVoices) {
+            if (item is Map) {
+              final voice = item.map((k, v) => MapEntry(k.toString(), v.toString()));
+              final locale = (voice['locale'] ?? '').toLowerCase();
+              if (locale.startsWith('es')) spanishVoices.add(voice);
             }
           }
-        } catch (_) {}
-
-        // b) Seleccionar una voz al azar de la lista
-        Map<String, String> selectedVoice;
-        if (spanishVoices.isNotEmpty) {
-          final randomIndex = Random().nextInt(spanishVoices.length);
-          selectedVoice = spanishVoices[randomIndex];
-        } else {
-          selectedVoice = {'name': 'es-es-x-sfb-local', 'locale': 'es-ES'};
         }
+      } catch (_) {}
 
-        // c) Generar un valor aleatorio de pitch (tono) entre 0.8 y 1.2
-        final randomPitch = double.parse((0.8 + (Random().nextDouble() * 0.4)).toStringAsFixed(2));
-        _uniqueVoicePitch = randomPitch;
-        _uniqueVoice = selectedVoice;
-        _selectedVoiceName = selectedVoice['name'];
-
-        // d) Aplicar y guardar identificador de voz y pitch en SharedPreferences
-        try {
-          await _flutterTts.setVoice(selectedVoice);
-          await _flutterTts.setPitch(_uniqueVoicePitch);
-        } catch (_) {}
-
-        await prefs.setString(key, jsonEncode({
-          'name': selectedVoice['name'],
-          'locale': selectedVoice['locale'],
-          'pitch': _uniqueVoicePitch,
-        }));
+      Map<String, String> selectedVoice;
+      if (spanishVoices.isNotEmpty) {
+        spanishVoices.sort((a, b) => scoreVoice(b, preferredLocale).compareTo(scoreVoice(a, preferredLocale)));
+        final best = spanishVoices.first;
+        selectedVoice = {'name': best['name'] ?? '', 'locale': best['locale'] ?? preferredLocale};
+      } else {
+        selectedVoice = {'name': 'es-es-x-sfb-local', 'locale': 'es-ES'};
       }
+
+      // Pequeña variación por dispositivo (0.96–1.04) para darle carácter sin distorsionar.
+      _uniqueVoicePitch = double.parse((0.96 + (Random().nextDouble() * 0.08)).toStringAsFixed(2));
+      _uniqueVoice = selectedVoice;
+      _selectedVoiceName = selectedVoice['name'];
+
+      try {
+        await _flutterTts.setVoice(selectedVoice);
+        await _flutterTts.setPitch(_uniqueVoicePitch);
+      } catch (_) {}
+
+      await prefs.setString(keyVoiceProfile, jsonEncode({
+        'v': _voiceProfileVersion,
+        'name': selectedVoice['name'],
+        'locale': selectedVoice['locale'],
+        'pitch': _uniqueVoicePitch,
+      }));
     } catch (e) {
-      debugPrint("Error al configurar huella de voz única: $e");
+      debugPrint("Error al configurar la voz del sistema: $e");
     }
   }
 
@@ -258,15 +321,14 @@ class KaiTtsService extends ChangeNotifier {
   }
 
   /// Modula los parámetros prosódicos según la emoción y reproduce el texto sanitizado.
+  /// No espera a que termine de hablar: el fin se notifica con [setOnCompletion].
   Future<void> speakWithEmotion(String rawText, KaiEmotion emotion) async {
     if (!_isEnabled || rawText.trim().isEmpty) return;
 
-    // Sanitizar texto para locución humana fluida
     final cleanText = sanitizeForTts(rawText);
     if (cleanText.isEmpty) return;
 
     try {
-      // Detener cualquier audio previo para evitar solapamientos
       await stop();
 
       if (!_isInitialized) {
@@ -276,9 +338,14 @@ class KaiTtsService extends ChangeNotifier {
       _lastEmotion = emotion;
       final profile = getProfileForEmotion(emotion);
 
-      // Combinar tono único de dispositivo con modulación por emoción
-      final effectivePitch = (_uniqueVoicePitch * (profile.pitch / 1.20)).clamp(0.5, 2.0);
+      if (isUsingNeural) {
+        _isSpeaking = true;
+        notifyListeners();
+        unawaited(_speakNeural(cleanText, profile));
+        return;
+      }
 
+      final effectivePitch = (_uniqueVoicePitch * profile.pitch).clamp(0.5, 2.0);
       await _flutterTts.setPitch(effectivePitch);
       await _flutterTts.setSpeechRate(profile.speechRate);
       await _flutterTts.setVolume(profile.volume);
@@ -294,10 +361,35 @@ class KaiTtsService extends ChangeNotifier {
     }
   }
 
+  Future<void> _speakNeural(String text, KaiAcousticProfile profile) async {
+    var finished = false;
+    try {
+      finished = await NeuralTtsService.instance.speak(text, speed: profile.neuralSpeed);
+    } catch (e) {
+      // Si la voz neuronal falla (memoria insuficiente, archivo dañado), usar la del sistema.
+      debugPrint("Voz neuronal no disponible, usando la del sistema: $e");
+      _isSpeaking = false;
+      final pitch = (_uniqueVoicePitch * profile.pitch).clamp(0.5, 2.0);
+      try {
+        await _flutterTts.setPitch(pitch);
+        await _flutterTts.setSpeechRate(profile.speechRate);
+        await _flutterTts.speak(text);
+      } catch (_) {}
+      return;
+    }
+    if (!finished) return;
+    _isSpeaking = false;
+    notifyListeners();
+    _onCompletionCallback?.call();
+  }
+
   /// Detiene inmediatamente la síntesis de voz en curso.
   Future<void> stop() async {
     try {
       await _flutterTts.stop();
+    } catch (_) {}
+    try {
+      await NeuralTtsService.instance.stop();
     } catch (_) {}
     _isSpeaking = false;
     notifyListeners();

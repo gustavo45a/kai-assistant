@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'models/app_theme.dart';
 import 'services/app_settings.dart';
+import 'services/device_profile.dart';
 import 'ui/screens/kai_setup_screen.dart';
 import 'ui/screens/home_screen.dart';
 
@@ -98,7 +99,7 @@ class VantablackApp extends StatefulWidget {
 class _VantablackAppState extends State<VantablackApp> {
   bool _isLoading = true;
   bool _hasCompletedOnboarding = false;
-  String _username = "Gustavo";
+  String _username = "";
   AppThemeStyle _currentTheme = AppThemeStyle.vantablackGlass;
 
   @override
@@ -108,6 +109,8 @@ class _VantablackAppState extends State<VantablackApp> {
   }
 
   Future<void> _loadSettings() async {
+    // Se detecta en paralelo: no debe retrasar la primera pantalla.
+    unawaited(DeviceProfile.instance.load());
     final completed = await AppSettings.hasCompletedOnboarding();
     final username = await AppSettings.getUsername();
     final theme = await AppSettings.getSavedTheme();
@@ -153,7 +156,7 @@ class _VantablackAppState extends State<VantablackApp> {
     }
 
     return MaterialApp(
-      title: 'Vantablack Hub v3.0.0',
+      title: 'Kai',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: themeData.backgroundColor,

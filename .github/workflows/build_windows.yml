@@ -47,7 +47,16 @@ jobs:
         VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
         echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+    # En ramas distintas de main el zip queda como artefacto de la ejecución, sin publicarse.
+    - name: Upload Build Artifact
+      if: github.ref != 'refs/heads/main'
+      uses: actions/upload-artifact@v4
+      with:
+        name: vantablack_hub-${{ env.VERSION }}-windows
+        path: vantablack_hub_windows.zip
+
     - name: Create Release
+      if: github.ref == 'refs/heads/main'
       uses: ncipollo/release-action@v1
       with:
         artifacts: "vantablack_hub_windows.zip"

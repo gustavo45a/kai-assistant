@@ -57,7 +57,7 @@ class AppSettings {
 
   static Future<String> getUsername() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(keyUsername) ?? 'Gustavo';
+    return prefs.getString(keyUsername) ?? '';
   }
 
   static Future<String> getDialect() async {

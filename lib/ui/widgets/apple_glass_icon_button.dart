@@ -1,9 +1,9 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'glass_blur.dart';
 
 /// Widget de botón con acabado Apple Glass de alta gama (iOS 18 / visionOS / macOS):
 /// - Geometría Squircle con esquinas continuas.
-/// - Vidrio esmerilado con desenfoque `BackdropFilter` (sigma 18).
+/// - Vidrio esmerilado opcional con [GlassBlur] (sigma 18, apagado por defecto).
 /// - Luz perimetral interior con gradiente especular (highlight superior e iluminación de bisel).
 /// - Sombra de profundidad difusa y aura de resplandor dinámico.
 /// - Microinteracción táctil con física de resorte (Spring physics) en `onTapDown` / `onTapUp`.
@@ -171,8 +171,8 @@ class _AppleGlassIconButtonState extends State<AppleGlassIconButton>
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(widget.borderRadius),
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: GlassBlur(
+                sigma: 18,
                 child: Container(
                   padding: widget.padding ?? EdgeInsets.all(widget.size * 0.22),
                   decoration: BoxDecoration(
@@ -332,8 +332,8 @@ class _AppleGlassCapsuleButtonState extends State<AppleGlassCapsuleButton>
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(widget.borderRadius),
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: GlassBlur(
+                sigma: 18,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
@@ -437,8 +437,8 @@ class AppleGlassSegmentedControl<T> extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: GlassBlur(
+          sigma: 16,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: children.entries.map((entry) {
@@ -564,8 +564,8 @@ class _AppleGlassPillState extends State<AppleGlassPill>
           scale: _scaleAnimation.value,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(widget.borderRadius),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: GlassBlur(
+              sigma: 16,
               child: Container(
                 padding: widget.padding,
                 decoration: BoxDecoration(

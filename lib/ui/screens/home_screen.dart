@@ -1,10 +1,8 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -33,6 +31,12 @@ import '../widgets/theme_selector_modal.dart';
 import '../widgets/dynamic_multicolor_background.dart';
 import '../widgets/kai_avatar_view.dart';
 import '../widgets/apple_glass_icon_button.dart';
+import '../widgets/chat/chat_composer.dart';
+import '../widgets/chat/chat_messages.dart';
+import '../widgets/chat/chat_style.dart';
+import '../widgets/chat/empty_chat_view.dart';
+import '../widgets/voice_settings_sheet.dart';
+import '../../services/device_profile.dart';
 
 class VantablackHome extends StatefulWidget {
   final String username;
@@ -51,8 +55,8 @@ class VantablackHome extends StatefulWidget {
 }
 
 class _VantablackHomeState extends State<VantablackHome> {
-  final String _versionHub = "3.1.0";
-  final int _currentBuildNumber = 40;
+  final String _versionHub = "3.2.0";
+  final int _currentBuildNumber = 41;
   // APK publicado por CI en la última release de GitHub; version.json puede indicar otra URL en "url".
   String _urlApkRemoto = "https://github.com/gustavo45a/kai-assistant/releases/latest/download/vantablack_hub.apk";
   final GlobalKey _repaintBoundaryKey = GlobalKey();
@@ -77,6 +81,7 @@ class _VantablackHomeState extends State<VantablackHome> {
   String? _customBgImagePath;
 
   bool _isGenerating = false;
+  bool _detenidoPorUsuario = false;
   bool _isEngineInitializing = true;
   bool _descargandoOta = false;
   bool _descargandoModelo = false;
@@ -142,6 +147,7 @@ class _VantablackHomeState extends State<VantablackHome> {
     // 2. INICIALIZACIÓN ASÍNCRONA NO BLOQUEANTE (Sin congelar el Main Thread)
     Future.microtask(() async {
       try {
+        await DeviceProfile.instance.load();
         await KaiTtsService.instance.init();
         await MemoryService.instance.init();
         final colorVal = await AppSettings.getCustomAccentColor();
@@ -154,7 +160,7 @@ class _VantablackHomeState extends State<VantablackHome> {
         // Inicialización en background si el modelo local ya existe
         if (_activeThread.rutaModeloLocal != null && File(_activeThread.rutaModeloLocal!).existsSync()) {
           try {
-            await LocalLLMService.instance.initializeRealModel(_activeThread.rutaModeloLocal!, threads: 4);
+            await LocalLLMService.instance.initializeRealModel(_activeThread.rutaModeloLocal!, threads: DeviceProfile.instance.llmThreads);
             _activeThread.modeloInicializado = true;
           } catch (_) {}
         }
@@ -202,9 +208,11 @@ class _VantablackHomeState extends State<VantablackHome> {
         return;
       }
       _speechInitialized = await _speechToText.initialize(
-        onError: (e) => setState(() => _isListening = false),
+        onError: (e) {
+          if (mounted) setState(() => _isListening = false);
+        },
         onStatus: (s) {
-          if (s == 'done' || s == 'notListening') {
+          if ((s == 'done' || s == 'notListening') && mounted) {
             setState(() => _isListening = false);
           }
         },
@@ -218,9 +226,11 @@ class _VantablackHomeState extends State<VantablackHome> {
       setState(() => _isListening = true);
       await _speechToText.listen(
         onResult: (result) {
-          setState(() {
-            _chatController.text = result.recognizedWords;
-          });
+          // El ChatComposer escucha al controller: no hace falta redibujar toda la pantalla.
+          _chatController.value = TextEditingValue(
+            text: result.recognizedWords,
+            selection: TextSelection.collapsed(offset: result.recognizedWords.length),
+          );
         },
         listenOptions: stt.SpeechListenOptions(
           partialResults: true,
@@ -338,7 +348,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       thread.iaModel = targetModel.id;
       thread.rutaModeloLocal = filePath;
 
-      await LocalLLMService.instance.initializeRealModel(filePath, threads: 4);
+      await LocalLLMService.instance.initializeRealModel(filePath, threads: DeviceProfile.instance.llmThreads);
       thread.modeloInicializado = true;
 
       if (mounted) {
@@ -465,6 +475,7 @@ class _VantablackHomeState extends State<VantablackHome> {
       threadActual.title = shortTitle;
     }
 
+    _detenidoPorUsuario = false;
     setState(() {
       _isGenerating = true;
       _currentKaiEmotion = KaiEmotion.thinking;
@@ -481,8 +492,8 @@ class _VantablackHomeState extends State<VantablackHome> {
 
     try {
       if (!LocalLLMService.instance.isModelLoaded && threadActual.rutaModeloLocal != null) {
-        // 3. OPTIMIZACIÓN C++: 4 hilos configurados para rendimiento móvil óptimo
-        await LocalLLMService.instance.initializeRealModel(threadActual.rutaModeloLocal!, threads: 4);
+        // Hilos según la gama del equipo: en gama baja se deja un núcleo libre para la UI.
+        await LocalLLMService.instance.initializeRealModel(threadActual.rutaModeloLocal!, threads: DeviceProfile.instance.llmThreads);
         threadActual.modeloInicializado = true;
       }
 
@@ -502,6 +513,7 @@ class _VantablackHomeState extends State<VantablackHome> {
         );
 
         final responseBuffer = StringBuffer();
+        final throttle = Stopwatch()..start();
         await for (final chunk in stream) {
           if (!_isGenerating) break;
           responseBuffer.write(chunk);
@@ -512,8 +524,12 @@ class _VantablackHomeState extends State<VantablackHome> {
             _currentKaiEmotion = parseResult.detectedEmotion!;
           }
 
-          // 1. OPTIMIZACIÓN DE RENDERIZADO: Aislamiento del token en ValueNotifier sin setState() global
-          _currentStreamingMessage.value = cleanStreaming;
+          // Solo la burbuja en streaming escucha este notifier, y como mucho ~20 veces por segundo.
+          if (throttle.elapsedMilliseconds >= 50) {
+            throttle.reset();
+            _currentStreamingMessage.value = cleanStreaming;
+            _followStreamingScroll();
+          }
         }
 
         final finalResult = KaiPersona.extractEmotionFromStream(responseBuffer.toString());
@@ -522,8 +538,13 @@ class _VantablackHomeState extends State<VantablackHome> {
         if (finalResult.detectedEmotion != null) {
           _currentKaiEmotion = finalResult.detectedEmotion!;
         }
-        threadActual.messages.last = {"sender": "assistant", "text": cleanText};
-        await _speakText(cleanText);
+        threadActual.messages.last = {
+          "sender": "assistant",
+          "text": cleanText.trim().isEmpty && _detenidoPorUsuario ? "Respuesta detenida." : cleanText,
+        };
+        if (!_detenidoPorUsuario) {
+          unawaited(_speakText(cleanText));
+        }
       } else {
         await Future.delayed(const Duration(milliseconds: 600));
         final fallbackMsg = "El modelo ${_getNomModel(_activeThread.iaModel)} no está descargado aún. Pulsa el botón de descarga en la barra superior o en el sidebar para cargarlo localmente.";
@@ -546,6 +567,25 @@ class _VantablackHomeState extends State<VantablackHome> {
         _scrollToBottom();
         _guardarDatosEnDisco();
       }
+    }
+  }
+
+  /// Detiene la respuesta en curso y conserva lo que Kai ya había escrito.
+  void _detenerGeneracion() {
+    if (!_isGenerating) return;
+    _detenidoPorUsuario = true;
+    setState(() => _isGenerating = false);
+    LocalLLMService.instance.stop();
+    KaiTtsService.instance.stop();
+  }
+
+  /// Mantiene visible el final de la respuesta mientras se escribe, salvo que el
+  /// usuario haya subido para leer algo anterior.
+  void _followStreamingScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.maxScrollExtent - position.pixels < 160) {
+      _scrollController.jumpTo(position.maxScrollExtent);
     }
   }
 
@@ -1450,6 +1490,7 @@ class _VantablackHomeState extends State<VantablackHome> {
   @override
   Widget build(BuildContext context) {
     final theme = AppThemeConfig.getTheme(_currentThemeStyle);
+    final colors = ChatColors.of(theme);
     final mediaQuery = MediaQuery.of(context);
     final isLandscapeScreen = mediaQuery.orientation == Orientation.landscape;
     final isWideScreen = mediaQuery.size.width >= 640;
@@ -1457,18 +1498,20 @@ class _VantablackHomeState extends State<VantablackHome> {
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: const Color(0xFF08090C),
+      backgroundColor: colors.background,
       drawer: shouldShowDrawer
           ? Drawer(
-              backgroundColor: const Color(0xFF141721),
+              backgroundColor: Color.lerp(colors.background, colors.text, 0.03),
+              shape: const RoundedRectangleBorder(),
               child: SafeArea(
-                child: _buildSidebarContent(theme, isLandscape: false, isDrawer: true),
+                child: _buildSidebarContent(theme, colors, isDrawer: true),
               ),
             )
           : null,
       body: DynamicMulticolorBackground(
         customAccentColor: _customAccentColor,
         customBgImagePath: _customBgImagePath,
+        opacity: 0.45,
         child: RepaintBoundary(
           key: _repaintBoundaryKey,
           child: SafeArea(
@@ -1480,39 +1523,24 @@ class _VantablackHomeState extends State<VantablackHome> {
                     final useTwoColumns = isLandscape || constraints.maxWidth >= 640;
 
                     if (useTwoColumns) {
-                      const sidebarWidth = 260.0;
-
                       return Row(
                         children: [
-                          // BARRA LATERAL NATIVA TRANSLÚCIDA ESTILO CHATGPT
                           Container(
-                            width: sidebarWidth,
-                            decoration: const BoxDecoration(
-                              color: Color(0xDE141721),
-                              border: Border(right: BorderSide(color: Color(0xFF232738), width: 0.8)),
+                            width: 270,
+                            decoration: BoxDecoration(
+                              color: Color.lerp(colors.background, colors.text, 0.03),
+                              border: Border(right: BorderSide(color: colors.divider, width: 0.6)),
                             ),
-                            child: _buildSidebarContent(theme, isLandscape: isLandscape),
+                            child: _buildSidebarContent(theme, colors),
                           ),
-                          // ÁREA DE CHAT PRINCIPAL
                           Expanded(
-                            child: _buildChatArea(
-                              theme,
-                              isLandscape: isLandscape,
-                              showMenuButton: false,
-                              constraints: constraints,
-                            ),
+                            child: _buildChatArea(theme, colors, showMenuButton: false, constraints: constraints),
                           ),
                         ],
                       );
                     }
 
-                    // MODO MÓVIL RETRATO
-                    return _buildChatArea(
-                      theme,
-                      isLandscape: false,
-                      showMenuButton: true,
-                      constraints: constraints,
-                    );
+                    return _buildChatArea(theme, colors, showMenuButton: true, constraints: constraints);
                   },
                 );
               },
@@ -1523,827 +1551,381 @@ class _VantablackHomeState extends State<VantablackHome> {
     );
   }
 
-  // --- BARRA LATERAL MINIMALISTA ESTILO CHATGPT ---
-  Widget _buildSidebarContent(AppThemeData theme, {required bool isLandscape, bool isDrawer = false}) {
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Logo & Título superior
-          Row(
+  // --- BARRA LATERAL ESTILO CLAUDE ---
+  Widget _buildSidebarContent(AppThemeData theme, ChatColors colors, {bool isDrawer = false}) {
+    void closeDrawer() {
+      if (isDrawer) Navigator.of(context).pop();
+    }
+
+    final downloadedModels = _modelosDisponibles.where((m) => m.isDownloaded).length;
+
+    // Una sola vista desplazable: en horizontal con el teclado abierto no cabe todo.
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              KaiAvatarView(
-                emotion: _currentKaiEmotion,
-                size: 26,
-                theme: theme,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  "KAI ASSISTANT",
-                  style: TextStyle(
-                    color: theme.textColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12.5,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-              if (isDrawer)
-                AppleGlassIconButton(
-                  icon: CupertinoIcons.xmark,
-                  size: 28,
-                  iconSize: 13,
-                  borderRadius: 10,
-                  tooltip: "Cerrar",
-                  onTap: () => Navigator.of(context).pop(),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // Botón + Nuevo Chat con cápsula Apple Glass
-          AppleGlassCapsuleButton(
-            icon: CupertinoIcons.add,
-            label: "Nuevo Chat",
-            primaryColor: theme.primaryColor,
-            onTap: () {
-              if (isDrawer) Navigator.of(context).pop();
-              _crearNuevaInstanciaLocal(_activeThread.iaModel);
-            },
-          ),
-          const SizedBox(height: 10),
-
-          // Botón de Gestión de Modelos GGUF con píldora de vidrio
-          AppleGlassPill(
-            borderRadius: 14,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            onTap: () {
-              if (isDrawer) Navigator.of(context).pop();
-              _mostrarModalModelos();
-            },
-            child: Row(
-              children: [
-                Icon(Icons.cloud_download_rounded, color: theme.primaryColor, size: 16),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    "Modelos GGUF",
-                    style: TextStyle(color: theme.textColor, fontSize: 11.5, fontWeight: FontWeight.w500),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: theme.primaryColor.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: theme.primaryColor.withValues(alpha: 0.35), width: 0.8),
-                  ),
-                  child: Text(
-                    "${_modelosDisponibles.where((m) => m.isDownloaded).length}/3",
-                    style: TextStyle(color: theme.primaryColor, fontSize: 9.5, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Header de sección de chats
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              "CHATS RECIENTES",
-              style: TextStyle(
-                fontSize: 9.5,
-                color: theme.subtitleColor,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-
-          // Lista de threads limpios estilo Apple Glass
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _threads.length,
-            itemBuilder: (context, index) {
-              final thread = _threads[index];
-              final isSelected = thread.id == _activeThreadId;
-
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2.5),
-                child: AppleGlassPill(
-                  borderRadius: 12,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  backgroundColor: isSelected
-                      ? theme.primaryColor.withValues(alpha: 0.16)
-                      : const Color(0xFF161822).withValues(alpha: 0.40),
-                  borderColor: isSelected
-                      ? theme.primaryColor.withValues(alpha: 0.55)
-                      : Colors.white.withValues(alpha: 0.08),
-                  onTap: () {
-                    setState(() => _activeThreadId = thread.id);
-                    if (isDrawer) Navigator.of(context).pop();
-                  },
-                  child: Row(
-                    children: [
-                      Icon(
-                        CupertinoIcons.chat_bubble_2,
-                        size: 14,
-                        color: isSelected ? theme.primaryColor : theme.subtitleColor,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          thread.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: isSelected ? theme.textColor : theme.subtitleColor,
-                            fontSize: 12,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 8, 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () {
+                          closeDrawer();
+                          _mostrarModalKaiStatus(context);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              KaiMark(colors: colors, size: 22),
+                              const SizedBox(width: 8),
+                              Text('Kai',
+                                  style: TextStyle(color: colors.text, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
+                            ],
                           ),
                         ),
                       ),
-                      if (_threads.length > 1)
-                        AppleGlassIconButton(
-                          icon: CupertinoIcons.trash,
-                          size: 22,
-                          iconSize: 12,
-                          borderRadius: 8,
-                          isDestructive: true,
-                          tooltip: "Borrar chat",
-                          onTap: () => _borrarThread(thread.id),
+                    ),
+                    if (isDrawer)
+                      IconButton(
+                        tooltip: 'Cerrar',
+                        icon: Icon(Icons.close_rounded, color: colors.muted, size: 20),
+                        onPressed: closeDrawer,
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Material(
+                  color: colors.surfaceHigh,
+                  borderRadius: BorderRadius.circular(14),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () {
+                      closeDrawer();
+                      _crearNuevaInstanciaLocal(_activeThread.iaModel);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_square, size: 18, color: colors.text),
+                          const SizedBox(width: 10),
+                          Text('Nuevo chat', style: TextStyle(color: colors.text, fontSize: 14.5, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+                child: Text('Recientes', style: TextStyle(color: colors.muted, fontSize: 12.5, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          sliver: SliverList.builder(
+            itemCount: _threads.length,
+            itemBuilder: (context, index) {
+              final thread = _threads[index];
+              final isSelected = thread.id == _activeThread.id;
+              return Material(
+                color: isSelected ? colors.surfaceHigh : Colors.transparent,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () {
+                    setState(() => _activeThreadId = thread.id);
+                    closeDrawer();
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 12, top: 2, bottom: 2),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            thread.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isSelected ? colors.text : colors.text.withValues(alpha: 0.78),
+                              fontSize: 14,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                            ),
+                          ),
                         ),
-                    ],
+                        if (isSelected && _threads.length > 1)
+                          IconButton(
+                            tooltip: 'Borrar chat',
+                            icon: Icon(Icons.delete_outline_rounded, size: 18, color: colors.muted),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => _borrarThread(thread.id),
+                          )
+                        else
+                          const SizedBox(height: 40),
+                      ],
+                    ),
                   ),
                 ),
               );
             },
           ),
-          const SizedBox(height: 16),
-
-          // Footer: Ajustes & Telemetría y perfil de usuario
-          const Divider(height: 1, color: Color(0xFF26293B)),
-          const SizedBox(height: 10),
-
-          AppleGlassPill(
-            borderRadius: 14,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            onTap: () {
-              if (isDrawer) Navigator.of(context).pop();
-              _mostrarModalAjustesTelemetria();
-            },
-            child: Row(
-              children: [
-                Icon(CupertinoIcons.slider_horizontal_3, size: 16, color: theme.primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    "Ajustes & Telemetría",
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: theme.textColor, fontSize: 11.5),
-                  ),
-                ),
-                Icon(CupertinoIcons.chevron_right, size: 14, color: theme.subtitleColor),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          // Perfil de usuario compacto
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 12,
-                backgroundColor: theme.primaryColor.withValues(alpha: 0.2),
-                child: Text(widget.username.isNotEmpty ? widget.username[0].toUpperCase() : "U", style: TextStyle(fontSize: 10, color: theme.primaryColor, fontWeight: FontWeight.bold)),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  widget.username,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: theme.textColor, fontSize: 11.5, fontWeight: FontWeight.w600),
-                ),
-              ),
-              Container(
-                width: 7,
-                height: 7,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color(0xFF2ECC71),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // --- HEADER SUPERIOR TRANSPARENTE MINIMALISTA APPLE GLASS ---
-  Widget _buildHeader(AppThemeData theme, {required bool isLandscape, required bool showMenuButton}) {
-    final activeModelName = _getNomModel(_activeThread.iaModel);
-
-    return LayoutBuilder(
-      builder: (context, headerConstraints) {
-        final isCompact = headerConstraints.maxWidth < 440;
-
-        return Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: isLandscape ? 12 : 10,
-            vertical: isLandscape ? 4 : 5,
-          ),
-          decoration: const BoxDecoration(
-            color: Colors.transparent,
-          ),
-          child: Row(
-            children: [
-              if (showMenuButton) ...[
-                Builder(
-                  builder: (scaffoldContext) => AppleGlassIconButton(
-                    icon: Icons.menu_rounded,
-                    size: 32,
-                    iconSize: 17,
-                    borderRadius: 10,
-                    tooltip: "Menú lateral",
-                    onTap: () => Scaffold.of(scaffoldContext).openDrawer(),
-                  ),
-                ),
-                const SizedBox(width: 4),
-              ],
-
-              // Chip Selector de Modelo Central con Dropdown Apple Glass
-              Flexible(
-                child: AppleGlassPill(
-                  borderRadius: 14,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  onTap: _mostrarModalModelos,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.memory_rounded, size: 13, color: theme.primaryColor),
-                      const SizedBox(width: 4),
-                      if (_isEngineInitializing) ...[
-                        SizedBox(
-                          width: 9,
-                          height: 9,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.5,
-                            color: theme.primaryColor,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      Flexible(
-                        child: Text(
-                          activeModelName,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: theme.textColor,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      Icon(CupertinoIcons.chevron_down, size: 10, color: theme.subtitleColor),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-
-              // Switch de Modos Apple Glass (Segmented Control completo en amplio, botón táctil en compacto)
-              if (!isCompact)
-                AppleGlassSegmentedControl<CoreMode>(
-                  selectedValue: _currentMode,
-                  height: 30,
-                  activeColor: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
-                  onValueChanged: (mode) => setState(() => _currentMode = mode),
-                  children: const {
-                    CoreMode.normal: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.bolt_rounded, size: 12),
-                        SizedBox(width: 3),
-                        Text("Normal"),
-                      ],
-                    ),
-                    CoreMode.estudiante: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.school_rounded, size: 12),
-                        SizedBox(width: 3),
-                        Text("Estudiante"),
-                      ],
-                    ),
-                  },
-                )
-              else
-                AppleGlassIconButton(
-                  icon: _currentMode == CoreMode.estudiante ? Icons.school_rounded : Icons.bolt_rounded,
-                  size: 32,
-                  iconSize: 15,
-                  borderRadius: 10,
-                  isActive: true,
-                  activeGlowColor: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
-                  iconColor: _currentMode == CoreMode.estudiante ? theme.secondaryColor : theme.primaryColor,
-                  tooltip: _currentMode == CoreMode.estudiante ? "Modo Estudiante" : "Modo Normal",
-                  onTap: () {
-                    setState(() {
-                      _currentMode = _currentMode == CoreMode.normal ? CoreMode.estudiante : CoreMode.normal;
-                    });
-                  },
-                ),
-              const SizedBox(width: 4),
-
-              // Botón Modo Live (Voz Continua) Apple Glass
-              AppleGlassIconButton(
-                icon: Icons.graphic_eq_rounded,
-                size: 32,
-                iconSize: 16,
-                borderRadius: 10,
-                isActive: true,
-                activeGlowColor: const Color(0xFF00E5FF),
-                tooltip: "Modo Live (Voz Continua)",
-                onTap: () {
-                  Navigator.of(context).push(
-                    CupertinoPageRoute(
-                      builder: (context) => LiveModeScreen(
-                        username: widget.username,
-                        currentTheme: _currentThemeStyle,
-                        initialMode: _currentMode,
-                      ),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(width: 4),
-
-              // Botón TTS Apple Glass
-              AppleGlassIconButton(
-                icon: KaiTtsService.instance.isEnabled ? CupertinoIcons.speaker_2_fill : CupertinoIcons.speaker_slash_fill,
-                size: 32,
-                iconSize: 15,
-                borderRadius: 10,
-                isActive: KaiTtsService.instance.isEnabled,
-                activeGlowColor: const Color(0xFF00E5FF),
-                tooltip: "Voz de Kai",
-                onTap: () {
-                  setState(() {
-                    KaiTtsService.instance.toggleEnabled();
-                  });
-                },
-              ),
-              const SizedBox(width: 4),
-
-              // Selector de temas Apple Glass
-              AppleGlassIconButton(
-                icon: CupertinoIcons.paintbrush,
-                size: 32,
-                iconSize: 15,
-                borderRadius: 10,
-                tooltip: "Tema visual",
-                onTap: () {
-                  mostrarSelectorTemasModal(
-                    context,
-                    _currentThemeStyle,
-                    (newTheme) {
-                      setState(() => _currentThemeStyle = newTheme);
-                      widget.onThemeChanged(newTheme);
-                    },
-                  );
-                },
-              ),
-              const SizedBox(width: 4),
-
-              // Avatar de Kai
-              GestureDetector(
-                onTap: () => _mostrarModalKaiStatus(context),
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: _currentKaiEmotion.moodColor.withValues(alpha: 0.25),
-                        blurRadius: 6,
-                      ),
-                    ],
-                  ),
-                  child: KaiAvatarView(
-                    emotion: _currentKaiEmotion,
-                    isThinking: _isGenerating,
-                    size: 26,
-                    theme: theme,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // --- ÁREA DE CHAT & HERO ESTILO CHATGPT ---
-  Widget _buildChatArea(
-    AppThemeData theme, {
-    required bool isLandscape,
-    required bool showMenuButton,
-    required BoxConstraints constraints,
-  }) {
-    final userMessages = _activeThread.messages.where((m) => m["sender"] == "user" || m["sender"] == "assistant").toList();
-    final isEmptyChat = userMessages.isEmpty;
-
-    return Column(
-      children: [
-        _buildHeader(theme, isLandscape: isLandscape, showMenuButton: showMenuButton),
-
-        Expanded(
-          child: isEmptyChat
-              ? _buildEmptyChatHero(theme, isLandscape)
-              : ListView.builder(
-                  controller: _scrollController,
-                  physics: const BouncingScrollPhysics(),
-                  padding: EdgeInsets.symmetric(horizontal: isLandscape ? 20 : 16, vertical: 12),
-                  itemCount: _activeThread.messages.length,
-                  itemBuilder: (context, index) {
-                    final msg = _activeThread.messages[index];
-                    if (msg["sender"] == "system") return const SizedBox.shrink();
-                    final isLast = index == _activeThread.messages.length - 1;
-                    return _buildChatMessageBubble(msg, theme, constraints, isLandscape, isLast: isLast);
-                  },
-                ),
         ),
-
-        _buildFloatingInputBar(theme, isLandscape),
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Divider(height: 1, color: colors.divider),
+              const SizedBox(height: 6),
+              _sidebarItem(colors, Icons.memory_rounded, 'Modelos', trailing: '$downloadedModels/${_modelosDisponibles.length}', onTap: () {
+                closeDrawer();
+                _mostrarModalModelos();
+              }),
+              _sidebarItem(colors, Icons.graphic_eq_rounded, 'Voz de Kai', onTap: () {
+                closeDrawer();
+                showVoiceSettingsSheet(context, theme);
+              }),
+              _sidebarItem(colors, Icons.palette_outlined, 'Tema', onTap: () {
+                closeDrawer();
+                mostrarSelectorTemasModal(context, _currentThemeStyle, (newTheme) {
+                  setState(() => _currentThemeStyle = newTheme);
+                  widget.onThemeChanged(newTheme);
+                });
+              }),
+              _sidebarItem(colors, Icons.tune_rounded, 'Ajustes', onTap: () {
+                closeDrawer();
+                _mostrarModalAjustesTelemetria();
+              }),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 15,
+                      backgroundColor: colors.accent.withValues(alpha: 0.22),
+                      child: Text(
+                        widget.username.isNotEmpty ? widget.username[0].toUpperCase() : 'U',
+                        style: TextStyle(fontSize: 13, color: colors.accent, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        widget.username,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: colors.text, fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
 
-  // --- HERO DE BIENVENIDA CUANDO EL CHAT ESTÁ VACÍO ---
-  Widget _buildEmptyChatHero(AppThemeData theme, bool isLandscape) {
-    return Center(
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+  Widget _sidebarItem(ChatColors colors, IconData icon, String label, {String? trailing, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+        child: Row(
           children: [
-            KaiAvatarView(
-              emotion: _currentKaiEmotion,
-              size: isLandscape ? 60 : 72,
-              isThinking: _isGenerating,
-              theme: theme,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              "¿En qué puedo ayudarte hoy, ${widget.username}?",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: isLandscape ? 17 : 20,
-                fontWeight: FontWeight.w600,
-                color: theme.textColor,
-                letterSpacing: 0.5,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              "Asistente técnico local • Inferencia 100% en dispositivo",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11.5, color: theme.subtitleColor),
-            ),
-            if (_isEngineInitializing) ...[
-              const SizedBox(height: 10),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 10,
-                    height: 10,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      color: theme.primaryColor,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    "Iniciando motor...",
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: theme.primaryColor.withValues(alpha: 0.85),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 20),
-
-            // Tarjetas de sugerencia Apple Glass
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: [
-                _buildSuggestionPill("⚡ Crear un script en Flutter", theme),
-                _buildSuggestionPill("🧠 Explicar arquitectura MVVM", theme),
-                _buildSuggestionPill("🔍 Optimizar memoria RAM", theme),
-                _buildSuggestionPill("🛠️ Depurar código Dart", theme),
-              ],
-            ),
+            Icon(icon, size: 19, color: colors.muted),
+            const SizedBox(width: 12),
+            Expanded(child: Text(label, style: TextStyle(color: colors.text, fontSize: 14))),
+            if (trailing != null) Text(trailing, style: TextStyle(color: colors.muted, fontSize: 12.5)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSuggestionPill(String text, AppThemeData theme) {
-    return AppleGlassPill(
-      borderRadius: 16,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-      onTap: _isGenerating ? null : () => _procesarMensajeLocal(text.substring(2).trim()),
-      child: Text(text, style: TextStyle(color: theme.textColor, fontSize: 11.5, fontWeight: FontWeight.w500)),
+  // --- ENCABEZADO MINIMALISTA ---
+  Widget _buildHeader(AppThemeData theme, ChatColors colors, {required bool showMenuButton}) {
+    final activeModelName = _getNomModel(_activeThread.iaModel);
+    final isStudent = _currentMode == CoreMode.estudiante;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+      child: Row(
+        children: [
+          if (showMenuButton)
+            Builder(
+              builder: (scaffoldContext) => IconButton(
+                tooltip: 'Menú',
+                icon: Icon(Icons.menu_rounded, color: colors.text),
+                onPressed: () => Scaffold.of(scaffoldContext).openDrawer(),
+              ),
+            )
+          else
+            const SizedBox(width: 8),
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: _mostrarModalModelos,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('Kai', style: TextStyle(color: colors.text, fontSize: 17, fontWeight: FontWeight.w600)),
+                          Text(
+                            _isEngineInitializing ? 'Cargando $activeModelName…' : activeModelName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: colors.muted, fontSize: 11.5),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.keyboard_arrow_down_rounded, size: 20, color: colors.muted),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: isStudent ? 'Modo Estudiante (toca para Normal)' : 'Modo Normal (toca para Estudiante)',
+            icon: Icon(isStudent ? Icons.school_rounded : Icons.bolt_rounded, color: isStudent ? colors.accentSecondary : colors.muted),
+            onPressed: () => setState(() => _currentMode = isStudent ? CoreMode.normal : CoreMode.estudiante),
+          ),
+          IconButton(
+            tooltip: 'Modo Live (voz continua)',
+            icon: Icon(Icons.graphic_eq_rounded, color: colors.muted),
+            onPressed: () {
+              Navigator.of(context).push(
+                CupertinoPageRoute(
+                  builder: (context) => LiveModeScreen(
+                    username: widget.username,
+                    currentTheme: _currentThemeStyle,
+                    initialMode: _currentMode,
+                  ),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: 'Nuevo chat',
+            icon: Icon(Icons.edit_square, color: colors.muted, size: 21),
+            onPressed: () => _crearNuevaInstanciaLocal(_activeThread.iaModel),
+          ),
+        ],
+      ),
     );
   }
 
-  // --- BURBUJAS DE MENSAJES ESTILO CHATGPT ---
-  Widget _buildChatMessageBubble(
-    Map<String, dynamic> msg,
+  // --- ÁREA DE CHAT ---
+  Widget _buildChatArea(
     AppThemeData theme,
-    BoxConstraints constraints,
-    bool isLandscape, {
-    bool isLast = false,
+    ChatColors colors, {
+    required bool showMenuButton,
+    required BoxConstraints constraints,
   }) {
-    final sender = msg["sender"];
-    final rawText = msg["text"] ?? '';
-    final cleanText = KaiPersona.cleanEmotionTags(rawText);
+    final messages = _activeThread.messages;
+    final isEmptyChat = !messages.any((m) => m["sender"] != "system");
+    final contentWidth = constraints.maxWidth > 760 ? 720.0 : constraints.maxWidth;
 
-    if (sender == "user") {
-      return Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          constraints: BoxConstraints(maxWidth: constraints.maxWidth * (isLandscape ? 0.65 : 0.82)),
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: const BoxDecoration(
-            color: Color(0xFF2A2B32),
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(18),
-              topRight: Radius.circular(18),
-              bottomLeft: Radius.circular(18),
-              bottomRight: Radius.circular(4),
+    return Column(
+      children: [
+        _buildHeader(theme, colors, showMenuButton: showMenuButton),
+        if (_descargandoModelo || _descargandoOta)
+          LinearProgressIndicator(
+            value: _descargandoModelo ? _progresoModelo : _progresoOta,
+            minHeight: 2,
+            color: colors.accent,
+            backgroundColor: Colors.transparent,
+          ),
+        Expanded(
+          child: Center(
+            child: SizedBox(
+              width: contentWidth,
+              child: isEmptyChat
+                  ? EmptyChatView(
+                      username: widget.username,
+                      colors: colors,
+                      isEngineInitializing: _isEngineInitializing,
+                      onSuggestion: (prompt) {
+                        if (!_isGenerating) _procesarMensajeLocal(prompt);
+                      },
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
+                      itemCount: messages.length,
+                      itemBuilder: (context, index) {
+                        final msg = messages[index];
+                        if (msg["sender"] == "system") return const SizedBox.shrink();
+                        return _buildMessage(msg, colors, contentWidth, isLast: index == messages.length - 1);
+                      },
+                    ),
             ),
           ),
-          child: SelectableText(
-            cleanText,
-            style: const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.4),
+        ),
+        Center(
+          child: SizedBox(
+            width: contentWidth,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: ChatComposer(
+                controller: _chatController,
+                colors: colors,
+                isGenerating: _isGenerating,
+                isListening: _isListening,
+                onSend: () => _procesarMensajeLocal(),
+                onStop: _detenerGeneracion,
+                onMic: _toggleListening,
+                onAttach: () => _mostrarModalToolbox(context),
+              ),
+            ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMessage(Map<String, String> msg, ChatColors colors, double contentWidth, {required bool isLast}) {
+    final text = KaiPersona.cleanEmotionTags(msg["text"] ?? '');
+
+    if (msg["sender"] == "user") {
+      return UserMessageBubble(text: text, colors: colors, maxWidth: contentWidth * 0.82);
+    }
+
+    // Solo la última respuesta escucha el streaming: el resto de la lista no se redibuja por token.
+    if (_isGenerating && isLast) {
+      return ValueListenableBuilder<String>(
+        valueListenable: _currentStreamingMessage,
+        builder: (context, streaming, _) => AssistantMessageView(
+          text: KaiPersona.cleanEmotionTags(streaming.isNotEmpty ? streaming : text),
+          colors: colors,
+          isStreaming: true,
         ),
       );
     }
 
-    // Mensaje de Kai (Asistente)
-    // 1. OPTIMIZACIÓN DE RENDERIZADO:
-    // Si la IA está generando y este es el último mensaje en streaming,
-    // se suscribe al ValueNotifier de modo que SOLO esta burbuja se reconstruya por token.
-    final bool isStreamingActive = _isGenerating && isLast;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          KaiAvatarView(
-            emotion: _currentKaiEmotion,
-            size: 26,
-            theme: theme,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: isStreamingActive
-                ? ValueListenableBuilder<String>(
-                    valueListenable: _currentStreamingMessage,
-                    builder: (context, streamingVal, _) {
-                      final displayText = streamingVal.isNotEmpty ? streamingVal : (cleanText.isNotEmpty ? cleanText : "...");
-                      final cleanStreaming = KaiPersona.cleanEmotionTags(displayText);
-                      return _buildFormattedAssistantContent(cleanStreaming, theme);
-                    },
-                  )
-                : _buildFormattedAssistantContent(cleanText, theme),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFormattedAssistantContent(String text, AppThemeData theme) {
-    // Si contiene bloques de código ```dart ... ```
-    if (text.contains('```')) {
-      final parts = text.split('```');
-      final List<Widget> children = [];
-
-      for (int i = 0; i < parts.length; i++) {
-        if (i % 2 == 0) {
-          // Texto normal
-          if (parts[i].trim().isNotEmpty) {
-            children.add(
-              SelectableText(
-                parts[i].trim(),
-                style: TextStyle(color: theme.textColor, fontSize: 13.5, height: 1.45),
-              ),
-            );
-          }
-        } else {
-          // Bloque de código
-          final codeBlock = parts[i];
-          final lines = codeBlock.split('\n');
-          final lang = lines.isNotEmpty && lines.first.trim().isNotEmpty ? lines.first.trim() : "code";
-          final codeContent = lines.length > 1 ? lines.sublist(1).join('\n') : codeBlock;
-
-          children.add(
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF13151F),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF282C3F)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF1A1C28),
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(lang.toUpperCase(), style: TextStyle(color: theme.primaryColor, fontSize: 10, fontWeight: FontWeight.bold)),
-                        InkWell(
-                          onTap: () {
-                            Clipboard.setData(ClipboardData(text: codeContent));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("Código copiado al portapapeles"), duration: Duration(seconds: 1)),
-                            );
-                          },
-                          child: Row(
-                            children: [
-                              Icon(Icons.copy_rounded, size: 12, color: theme.subtitleColor),
-                              const SizedBox(width: 4),
-                              Text("Copiar", style: TextStyle(color: theme.subtitleColor, fontSize: 10)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: SelectableText(
-                      codeContent.trim(),
-                      style: const TextStyle(
-                        color: Color(0xFFE2E8F0),
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-      }
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: children);
-    }
-
-    return SelectableText(
-      text,
-      style: TextStyle(color: theme.textColor, fontSize: 13.5, height: 1.45),
-    );
-  }
-
-  // --- BARRA INFERIOR DE ENTRADA ESTILO APPLE GLASS ---
-  Widget _buildFloatingInputBar(AppThemeData theme, bool isLandscape) {
-    final hasText = _chatController.text.trim().isNotEmpty;
-
-    return Container(
-      margin: EdgeInsets.symmetric(
-        horizontal: isLandscape ? 18 : 14,
-        vertical: isLandscape ? 6 : 10,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1C27).withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 1.1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.40),
-            blurRadius: 18,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Botón + Apple Glass
-              AppleGlassIconButton(
-                icon: CupertinoIcons.plus,
-                size: 36,
-                iconSize: 18,
-                borderRadius: 18,
-                iconColor: theme.primaryColor,
-                tooltip: "Herramientas y OCR",
-                onTap: _isGenerating ? null : () => _mostrarModalToolbox(context),
-              ),
-
-              const SizedBox(width: 4),
-
-              // Campo de texto expandible (deshabilitado cuando _isGenerating == true)
-              Expanded(
-                child: TextField(
-                  controller: _chatController,
-                  enabled: !_isGenerating,
-                  minLines: 1,
-                  maxLines: 5,
-                  onChanged: (_) => setState(() {}),
-                  style: TextStyle(
-                    color: _isGenerating ? theme.subtitleColor : theme.textColor,
-                    fontSize: 13.5,
-                    height: 1.35,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: (_activeThread.pensando || _isGenerating) ? "Kai está procesando..." : "Pregunta a Kai...",
-                    hintStyle: TextStyle(color: theme.subtitleColor, fontSize: 13.5),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                  ),
-                  onSubmitted: (_) => _isGenerating ? null : _procesarMensajeLocal(),
-                ),
-              ),
-
-              const SizedBox(width: 4),
-
-              // Botón Micrófono Apple Glass con onda/glow activo
-              AppleGlassIconButton(
-                icon: _isListening ? CupertinoIcons.mic_fill : CupertinoIcons.mic,
-                size: 36,
-                iconSize: 18,
-                borderRadius: 18,
-                isActive: _isListening,
-                isPulsing: _isListening,
-                activeGlowColor: const Color(0xFFFF3B30),
-                iconColor: _isListening ? const Color(0xFFFF3B30) : theme.subtitleColor,
-                tooltip: _isListening ? "Escuchando..." : "Dictado por voz",
-                onTap: _isGenerating ? null : _toggleListening,
-              ),
-
-              const SizedBox(width: 4),
-
-              // Botón Enviar Apple Glass con aura cian (deshabilitado / onPressed: null mientras genera)
-              AppleGlassIconButton(
-                icon: _isGenerating ? CupertinoIcons.stop_fill : CupertinoIcons.arrow_up,
-                size: 36,
-                iconSize: 18,
-                borderRadius: 18,
-                isActive: !_isGenerating && hasText,
-                activeGlowColor: const Color(0xFF00E5FF),
-                isDestructive: false,
-                isPulsing: false,
-                backgroundColor: !_isGenerating && hasText
-                    ? theme.primaryColor.withValues(alpha: 0.95)
-                    : const Color(0xFF282C3D).withValues(alpha: 0.60),
-                iconColor: !_isGenerating && hasText
-                    ? Colors.black
-                    : const Color(0xFF94A3B8),
-                tooltip: _isGenerating ? "Generando respuesta..." : "Enviar mensaje",
-                onTap: (_isGenerating || !hasText) ? null : () => _procesarMensajeLocal(),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return AssistantMessageView(
+      text: text,
+      colors: colors,
+      onSpeak: () => KaiTtsService.instance.speakWithEmotion(text, _currentKaiEmotion),
     );
   }
 }

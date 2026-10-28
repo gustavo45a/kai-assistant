@@ -5,6 +5,7 @@ import '../models/chat_thread.dart';
 import '../models/kai_persona.dart';
 import 'zram_memory_manager.dart';
 import 'hardware_scanner.dart';
+import 'device_profile.dart';
 
 class LocalLLMService {
   static final LocalLLMService instance = LocalLLMService._internal();
@@ -55,7 +56,7 @@ class LocalLLMService {
     // Reducción estricta de contextSize para móviles (1024 o máximo 2048)
     final hardware = await HardwareScanner.scan();
     final freeRam = (hardware['freeRamGb'] as num?)?.toDouble() ?? 4.0;
-    _currentContextSize = (overrideContextSize ?? (freeRam >= 3.5 ? 2048 : 1024)).clamp(1024, 2048);
+    _currentContextSize = (overrideContextSize ?? (freeRam >= 3.5 ? DeviceProfile.instance.llmContextSize : 1024)).clamp(1024, 2048);
 
     try {
       await _controller.loadModel(

@@ -10,6 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
     - uses: actions/checkout@v4
@@ -31,6 +36,20 @@ jobs:
     - name: Install Dependencies
       run: flutter pub get
 
+    - name: Configure Release Signing
+      run: |
+        if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+          echo "::warning::Sin el secreto ANDROID_KEYSTORE_BASE64 el APK se firma con una clave temporal y no podrá actualizar instalaciones anteriores."
+          exit 0
+        fi
+        echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.jks
+        {
+          echo "storeFile=release.jks"
+          echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+          echo "keyAlias=$ANDROID_KEY_ALIAS"
+          echo "keyPassword=${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
+        } > android/key.properties
+
     - name: Build APK Release
       run: flutter build apk --release --android-skip-build-dependency-validation
 
@@ -40,7 +59,16 @@ jobs:
         echo "VERSION=$VERSION" >> "$GITHUB_ENV"
         cp build/app/outputs/flutter-apk/app-release.apk vantablack_hub.apk
 
+    # En ramas distintas de main el APK queda como artefacto de la ejecución, sin publicarse.
+    - name: Upload Build Artifact
+      if: github.ref != 'refs/heads/main'
+      uses: actions/upload-artifact@v4
+      with:
+        name: vantablack_hub-${{ env.VERSION }}-apk
+        path: vantablack_hub.apk
+
     - name: Upload to Release
+      if: github.ref == 'refs/heads/main'
       uses: ncipollo/release-action@v1
       with:
         artifacts: "vantablack_hub.apk"
