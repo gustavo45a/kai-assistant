@@ -25,10 +25,8 @@ jobs:
       with:
         channel: 'stable'
 
-    - name: Set up NDK
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: r26d
+    - name: Install Android NDK
+      run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.3.11579264" > /dev/null
 
     - name: Install Dependencies
       run: flutter pub get

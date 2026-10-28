@@ -13,8 +13,13 @@ allprojects {
 subprojects {
     afterEvaluate { p ->
         if (p.hasProperty("android")) {
-            p.android.ndkVersion = "26.1.10909125"
-            def ndkDir = p.android.ndkDirectory
+            p.android.ndkVersion = "26.3.11579264"
+            def ndkDir = null
+            try {
+                ndkDir = p.android.ndkDirectory
+            } catch (Exception ignored) {
+                // NDK aún no instalado: AGP lo resolverá al compilar
+            }
             if (ndkDir != null && ndkDir.exists()) {
                 p.android.defaultConfig {
                     externalNativeBuild {
