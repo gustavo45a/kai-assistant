@@ -1,3 +1,0 @@
-/workspaces/kai-assistant/android/app/.cxx/RelWithDebInfo/76q5z4c6/x86_64/CMakeFiles/rebuild_cache.dir
-/workspaces/kai-assistant/android/app/.cxx/RelWithDebInfo/76q5z4c6/x86_64/CMakeFiles/edit_cache.dir
-/workspaces/kai-assistant/android/app/.cxx/RelWithDebInfo/76q5z4c6/x86_64/CMakeFiles/llama-jni.dir
