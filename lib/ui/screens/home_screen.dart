@@ -53,7 +53,8 @@ class VantablackHome extends StatefulWidget {
 class _VantablackHomeState extends State<VantablackHome> {
   final String _versionHub = "3.1.0";
   final int _currentBuildNumber = 40;
-  final String _urlApkRemoto = "https://gustavo45a.github.io/kai-assistant/docs/vantablack_hub.apk";
+  // APK publicado por CI en la última release de GitHub; version.json puede indicar otra URL en "url".
+  String _urlApkRemoto = "https://github.com/gustavo45a/kai-assistant/releases/latest/download/vantablack_hub.apk";
   final GlobalKey _repaintBoundaryKey = GlobalKey();
 
   late AppThemeStyle _currentThemeStyle;
@@ -235,6 +236,10 @@ class _VantablackHomeState extends State<VantablackHome> {
       if (response.statusCode == 200) {
         final data = response.data is String ? jsonDecode(response.data) : response.data;
         final remoteBuild = (data['buildNumber'] as num?)?.toInt() ?? _currentBuildNumber;
+        final remoteUrl = data['url'];
+        if (remoteUrl is String && remoteUrl.isNotEmpty) {
+          _urlApkRemoto = remoteUrl;
+        }
         if (remoteBuild > _currentBuildNumber) {
           _ejecutarActualizacionOTA();
         }
