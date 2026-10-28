@@ -34,11 +34,18 @@ jobs:
     - name: Build APK Release
       run: flutter build apk --release --android-skip-build-dependency-validation
 
+    - name: Prepare Release
+      run: |
+        VERSION=$(grep '^version:' pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        cp build/app/outputs/flutter-apk/app-release.apk vantablack_hub.apk
+
     - name: Upload to Release
       uses: ncipollo/release-action@v1
       with:
-        artifacts: "build/app/outputs/flutter-apk/app-release.apk"
-        tag: "v3.1.0"
-        name: "Vantablack Hub v3.1.0"
+        artifacts: "vantablack_hub.apk"
+        tag: "v${{ env.VERSION }}"
+        name: "Vantablack Hub v${{ env.VERSION }}"
         allowUpdates: true
+        makeLatest: true
         token: ${{ secrets.GITHUB_TOKEN }}
