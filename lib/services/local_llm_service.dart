@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:llama_flutter_android/llama_flutter_android.dart';
 import '../models/chat_thread.dart';
 import '../models/kai_persona.dart';
@@ -113,7 +114,7 @@ class LocalLLMService {
       final filteredHistory = history.where((msg) {
         final text = msg['text'] ?? '';
         final sender = msg['sender'] ?? '';
-        return sender != 'system' && text.isNotEmpty && !text.startsWith('[ERROR') && !text.startsWith('⚠️') && text != '...';
+        return sender != 'system' && msg['error'] != '1' && text.isNotEmpty && !text.startsWith('[ERROR') && !text.startsWith('⚠️') && text != '...';
       }).toList();
 
       // Recortar estrictamente a un máximo de 6 mensajes (las interacciones más recientes)
@@ -170,35 +171,59 @@ class LocalLLMService {
     _isGenerating = true;
 
     try {
-      final String promptFormatted = buildChatMLPrompt(
-        prompt: prompt,
-        variables: variables,
-        history: history,
-      );
-
-      const int reservedMaxTokens = 512;
-
-      final stream = _controller.generate(
-        prompt: promptFormatted,
-        maxTokens: reservedMaxTokens,
-        temperature: 0.6,
-        topP: 0.9,
-        repeatPenalty: 1.18,
-      );
-
-      await for (final chunk in stream) {
-        if (!_isGenerating) break;
-        if (chunk.contains("<|im_end|>") || chunk.contains("<|endoftext|>")) {
-          final cleanChunk = chunk.replaceAll("<|im_end|>", "").replaceAll("<|endoftext|>", "");
-          if (cleanChunk.isNotEmpty) yield cleanChunk;
-          break;
+      var emitted = false;
+      try {
+        await for (final chunk in _generateOnce(buildChatMLPrompt(prompt: prompt, variables: variables, history: history))) {
+          emitted = true;
+          yield chunk;
         }
-        yield chunk;
+      } catch (e) {
+        // Si el prompt no cupo, se reintenta una vez sin historial (solo si aún no se mostró nada).
+        if (emitted || !_isGenerating) rethrow;
+        debugPrint("Reintentando sin historial tras error del motor: $e");
+        await for (final chunk in _generateOnce(buildChatMLPrompt(prompt: prompt, variables: variables))) {
+          yield chunk;
+        }
       }
     } catch (e) {
-      yield "\n⚠️ [Error en motor nativo]: No se pudo decodificar o generar respuesta: $e";
+      throw LlmGenerationException(e.toString());
     } finally {
       _isGenerating = false;
     }
   }
+
+  Stream<String> _generateOnce(String promptFormatted) async* {
+    // El motor nativo conserva en su caché KV todo lo procesado antes; como cada
+    // turno se envía con el historial completo, sin limpiar la caché los turnos se
+    // acumulaban hasta desbordar el contexto ("Failed to decode prompt").
+    await _controller.clearContext();
+
+    const int reservedMaxTokens = 512;
+    final stream = _controller.generate(
+      prompt: promptFormatted,
+      maxTokens: reservedMaxTokens,
+      temperature: 0.6,
+      topP: 0.9,
+      repeatPenalty: 1.18,
+    );
+
+    await for (final chunk in stream) {
+      if (!_isGenerating) break;
+      if (chunk.contains("<|im_end|>") || chunk.contains("<|endoftext|>")) {
+        final cleanChunk = chunk.replaceAll("<|im_end|>", "").replaceAll("<|endoftext|>", "");
+        if (cleanChunk.isNotEmpty) yield cleanChunk;
+        break;
+      }
+      yield chunk;
+    }
+  }
+}
+
+/// Error del motor local al generar una respuesta.
+class LlmGenerationException implements Exception {
+  final String details;
+  const LlmGenerationException(this.details);
+
+  @override
+  String toString() => "LlmGenerationException: $details";
 }

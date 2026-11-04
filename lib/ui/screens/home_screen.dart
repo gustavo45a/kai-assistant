@@ -552,9 +552,15 @@ class _VantablackHomeState extends State<VantablackHome> {
         _currentKaiEmotion = KaiEmotion.neutral;
       }
     } catch (e) {
-      // 4. MANEJO DE ERRORES: Capturar fallo y presentar mensaje amigable en el chat
-      final errorMsg = "⚠️ Lo siento, ocurrió un error durante la inferencia local ($e). Por favor, intenta de nuevo.";
-      threadActual.messages.last = {"sender": "assistant", "text": errorMsg};
+      // El error se guarda marcado: se muestra como tarjeta con "Reintentar" y no entra al historial del modelo.
+      debugPrint("Error de inferencia local: $e");
+      threadActual.messages.last = {
+        "sender": "assistant",
+        "error": "1",
+        "text": _detenidoPorUsuario
+            ? "Respuesta detenida."
+            : "Kai no pudo responder esta vez. Suele pasar cuando la conversación es muy larga para la memoria del modelo.",
+      };
       _currentKaiEmotion = KaiEmotion.neutral;
     } finally {
       // 2. BLOQUEO DE ESTADO: Resetear isGenerating tanto al finalizar como al fallar
@@ -1922,10 +1928,30 @@ class _VantablackHomeState extends State<VantablackHome> {
       );
     }
 
+    // Los mensajes de error de versiones anteriores empezaban con "⚠️".
+    final isLegacyError = text.startsWith("⚠️");
+    if (msg["error"] == "1" || isLegacyError) {
+      return ChatErrorCard(
+        message: isLegacyError ? "Kai no pudo responder este mensaje." : text,
+        colors: colors,
+        onRetry: isLast && !_isGenerating ? _reintentarUltimoMensaje : null,
+      );
+    }
+
     return AssistantMessageView(
       text: text,
       colors: colors,
       onSpeak: () => KaiTtsService.instance.speakWithEmotion(text, _currentKaiEmotion),
     );
+  }
+
+  /// Quita la respuesta fallida y vuelve a enviar el último mensaje del usuario.
+  void _reintentarUltimoMensaje() {
+    final messages = _activeThread.messages;
+    final lastUser = messages.lastIndexWhere((m) => m["sender"] == "user");
+    if (lastUser < 0) return;
+    final prompt = messages[lastUser]["text"] ?? "";
+    setState(() => messages.removeRange(lastUser, messages.length));
+    _procesarMensajeLocal(prompt);
   }
 }

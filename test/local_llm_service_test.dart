@@ -61,6 +61,23 @@ void main() {
       expect(prompt, contains("Última pregunta"));
     });
 
+    test('buildChatMLPrompt leaves failed replies out of the model history', () {
+      final prompt = LocalLLMService.instance.buildChatMLPrompt(
+        prompt: "¿Y ahora?",
+        variables: {'modoEstudiante': false, 'username': 'Alex'},
+        history: [
+          {'sender': 'user', 'text': 'Explícame Dart'},
+          {'sender': 'assistant', 'error': '1', 'text': 'Kai no pudo responder esta vez.'},
+          {'sender': 'assistant', 'text': '⚠️ [Error en motor nativo]: Failed to decode prompt'},
+        ],
+        overrideContextSize: 2048,
+      );
+
+      expect(prompt, contains("Explícame Dart"));
+      expect(prompt, isNot(contains("Kai no pudo responder")));
+      expect(prompt, isNot(contains("Failed to decode prompt")));
+    });
+
     test('generateResponseStream safely yields error message when model is not initialized', () async {
       final stream = LocalLLMService.instance.generateResponseStream(
         "Hola",

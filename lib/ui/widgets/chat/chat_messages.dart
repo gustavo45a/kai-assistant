@@ -161,3 +161,51 @@ class _TypingIndicatorState extends State<TypingIndicator> with SingleTickerProv
     );
   }
 }
+
+/// Error de Kai explicado en lenguaje claro, con opción de reintentar.
+class ChatErrorCard extends StatelessWidget {
+  final String message;
+  final ChatColors colors;
+  final VoidCallback? onRetry;
+
+  const ChatErrorCard({super.key, required this.message, required this.colors, this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    const warning = Color(0xFFFFB4A9);
+    return Container(
+      margin: const EdgeInsets.only(top: 14, bottom: 4),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
+      decoration: BoxDecoration(
+        color: Color.lerp(colors.surface, warning, 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: warning.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.error_outline_rounded, color: warning, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(message, style: TextStyle(color: colors.text, fontSize: 14.5, height: 1.4)),
+              ),
+            ],
+          ),
+          if (onRetry != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: onRetry,
+                style: TextButton.styleFrom(foregroundColor: colors.text),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Reintentar'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
