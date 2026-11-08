@@ -43,19 +43,19 @@ for side, sel in (('L', H[H[:, 0] > cx]), ('R', H[H[:, 0] <= cx])):
     b = base.mean(0) if len(base) else tip - [0, 0.35 * hh, 0]
     mid = b + (tip - b) * 0.5
     joints.append(b); parents.append(head_j); tags.append('oreja_' + side)
-    joints.append(mid); parents.append(len(joints) - 1); tags.append('oreja_' + side)
-    joints.append(tip); parents.append(len(joints) - 1); tags.append('oreja_' + side)
+    parents.append(len(joints) - 1); joints.append(mid); tags.append('oreja_' + side)
+    parents.append(len(joints) - 1); joints.append(tip); tags.append('oreja_' + side)
 # --- cara: mandíbula y párpados en los puntos detectados en la textura
 t_ = cv2.imread(tex, cv2.IMREAD_UNCHANGED)
 ff = rig.face_features(V, VT, G, names, P, J, t_)
 neck = J['Head'] - off
 mouth = ff['mouth'][0] - off
 joints.append(neck + (mouth - neck) * 0.35); parents.append(head_j); tags.append('mandibula')
-joints.append(mouth); parents.append(len(joints) - 1); tags.append('mandibula')
+parents.append(len(joints) - 1); joints.append(mouth); tags.append('mandibula')
 for side in ('L', 'R'):
     e = ff['eye_' + side][0] - off; r_ = ff['eye_' + side][1]
     joints.append(e + [0, r_ * 1.0, -r_ * 0.3]); parents.append(head_j); tags.append('parpado_' + side)
-    joints.append(e + [0, r_ * 1.0, r_ * 0.2]); parents.append(len(joints) - 1); tags.append('parpado_' + side)
+    parents.append(len(joints) - 1); joints.append(e + [0, r_ * 1.0, r_ * 0.2]); tags.append('parpado_' + side)
 json.dump({'joints': [list(map(float, j)) for j in joints], 'parents': parents, 'tags': tags,
            'fuente': {'cuerpo': 'UniRig tipo 264', 'cola': 'UniRig tipo 265', 'orejas_cara': 'geometría/textura'}}, open(out, 'w'))
 from collections import Counter; print(out, Counter(tags))
